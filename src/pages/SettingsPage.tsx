@@ -26,6 +26,7 @@ import {
   BookOpen,
 } from 'lucide-react'
 import { MODELS, SORTED_MODELS, FREE_MODELS, getModelById, RECOMMENDED_FREE_MODEL } from '../lib/models'
+import { DEFAULT_SETTINGS, DEFAULT_ACTIVE_MODEL_ID } from '../stores/chatStore'
 
 interface Preset {
   label: string
@@ -132,16 +133,18 @@ export default function SettingsPage(): React.ReactElement {
     exportConversation,
   } = store
 
-  const [endpoint, setEndpoint] = useState<string>(settings.endpoint)
-  const [apiKey, setApiKey] = useState<string>(settings.apiKey)
-  const [modelName, setModelName] = useState<string>(settings.modelName)
-  const [temperature, setTemperature] = useState<number>(settings.temperature)
-  const [maxTokens, setMaxTokens] = useState<number>(settings.maxTokens)
-  const [topP, setTopP] = useState<number>(settings.topP)
+  // ⚠️ 直接从代码常量读取默认配置，不依赖 store 的 hydrate 时序
+  // 确保：除非代码修改，否则每次打开 API 配置不变
+  const [endpoint, setEndpoint] = useState<string>(DEFAULT_SETTINGS.endpoint)
+  const [apiKey, setApiKey] = useState<string>(DEFAULT_SETTINGS.apiKey)
+  const [modelName, setModelName] = useState<string>(DEFAULT_SETTINGS.modelName)
+  const [temperature, setTemperature] = useState<number>(DEFAULT_SETTINGS.temperature)
+  const [maxTokens, setMaxTokens] = useState<number>(DEFAULT_SETTINGS.maxTokens)
+  const [topP, setTopP] = useState<number>(DEFAULT_SETTINGS.topP)
   const [showApiKey, setShowApiKey] = useState<boolean>(false)
   const [savedMsg, setSavedMsg] = useState<boolean>(false)
   const [confirmClear, setConfirmClear] = useState<boolean>(false)
-  const [selectedModelId, setSelectedModelId] = useState<string>(store.currentModelId || RECOMMENDED_FREE_MODEL?.id || 'local-smart')
+  const [selectedModelId, setSelectedModelId] = useState<string>(DEFAULT_ACTIVE_MODEL_ID)
   const [modelDropdownOpen, setModelDropdownOpen] = useState<boolean>(false)
   const [showFreeGuide, setShowFreeGuide] = useState<boolean>(false)
 

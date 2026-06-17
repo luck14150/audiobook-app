@@ -128,9 +128,9 @@ function uid(): string { return genId() }
 // ===================== Store 定义 =====================
 
 // 默认使用 Agnes AI（永久免费·无限用，新加坡 Sapiens AI）
-const DEFAULT_ACTIVE_MODEL_ID = 'agnes-2.0-flash'
+export const DEFAULT_ACTIVE_MODEL_ID = 'agnes-2.0-flash'
 
-const DEFAULT_SETTINGS: ApiSettings = {
+export const DEFAULT_SETTINGS: ApiSettings = {
   endpoint: 'https://apihub.agnes-ai.com/v1',
   apiKey: 'sk-tIQbtS4899pY8zv4mtL7iAf5nBLpD6NY5AWVv8ho4vADZxZb',
   modelName: 'agnes-2.0-flash',
@@ -557,6 +557,9 @@ export const useChatStore = create<ChatStore>()(
     {
       name: 'datamind-chat-v1',
       storage: createJSONStorage(() => localStorage),
+      // version 2: 引入"除非代码修改，否则 API 不变"策略
+      // 任何旧版本数据（version 0 或 1）都将通过 migrate 清除 settings 字段
+      version: 2,
       partialize: (state) => ({
         sessions: state.sessions,
         messages: state.messages,
@@ -568,18 +571,27 @@ export const useChatStore = create<ChatStore>()(
         sidebarCollapsed: state.sidebarCollapsed,
         apiKeys: state.apiKeys,
         currentModelId: state.currentModelId,
+        // ⚠️ settings 不持久化——始终使用代码中 DEFAULT_SETTINGS
       }),
-      // 恢复时强制忽略旧的 settings，始终使用代码中的 DEFAULT_SETTINGS
-      // 这确保：除非代码修改，否则每次打开 API 配置不变
+      // migrate: 旧版本数据强制清除 settings 字段
+      migrate: (persistedState, version) => {
+        if (version < 2 && persistedState && typeof persistedState === 'object') {
+          const { settings, ...clean } = persistedState as Record<string, any>
+          void settings
+          return clean
+        }
+        return persistedState
+      },
+      // merge: 最终防线——无论持久化数据包含什么，settings 永远用 DEFAULT_SETTINGS
       merge: (persistedState, currentState) => {
-        const persisted = (persistedState || {}) as Partial<ChatStore>
-        const { settings, ...rest } = persisted
+        const persisted = persistedState || {}
+        const { settings, ...rest } = persisted as Record<string, any>
         void settings
         return {
           ...currentState,
           ...rest,
           settings: DEFAULT_SETTINGS,
-        }
+        } as ChatStore
       },
     }
   )
