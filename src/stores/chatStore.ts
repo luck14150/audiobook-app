@@ -562,7 +562,6 @@ export const useChatStore = create<ChatStore>()(
         messages: state.messages,
         activeSessionId: state.activeSessionId,
         knowledge: state.knowledge,
-        settings: state.settings,
         activePersonaId: state.activePersonaId,
         theme: state.theme,
         fontSize: state.fontSize,
@@ -570,6 +569,18 @@ export const useChatStore = create<ChatStore>()(
         apiKeys: state.apiKeys,
         currentModelId: state.currentModelId,
       }),
+      // 恢复时强制忽略旧的 settings，始终使用代码中的 DEFAULT_SETTINGS
+      // 这确保：除非代码修改，否则每次打开 API 配置不变
+      merge: (persistedState, currentState) => {
+        const persisted = (persistedState || {}) as Partial<ChatStore>
+        const { settings, ...rest } = persisted
+        void settings
+        return {
+          ...currentState,
+          ...rest,
+          settings: DEFAULT_SETTINGS,
+        }
+      },
     }
   )
 )
