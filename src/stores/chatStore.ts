@@ -10,6 +10,8 @@ import { persist, createJSONStorage } from 'zustand/middleware'
 import type { KnowledgeEntry } from '../lib/shared'
 import type { PersonaProfile } from '../lib/smartAI'
 import { PERSONAS, generateReply, streamReply, getPersonaById } from '../lib/smartAI'
+import { RECOMMENDED_FREE_MODEL, getModelById, type ModelInfo } from '../lib/models'
+import { chatCompletionStream, type ChatMessage as AChatMessage, type StreamingCallbacks } from '../lib/aiClient'
 
 // ===================== 数据类型 =====================
 
@@ -74,6 +76,7 @@ interface ChatStore {
   setCurrentConversation: (id: string | null) => void
   setCurrentPersona: (id: string) => void
   setCurrentModel: (id: string) => void
+  setModelById: (modelId: string) => void
   createConversation: (personaId?: string, title?: string) => ChatSession
   deleteConversation: (id: string) => void
   pinConversation: (id: string, pinned?: boolean) => void
@@ -124,10 +127,13 @@ function uid(): string { return genId() }
 
 // ===================== Store 定义 =====================
 
+// 默认使用推荐的免费模型（OpenRouter 的 Step-3.5-Flash）
+const DEFAULT_ACTIVE_MODEL_ID = RECOMMENDED_FREE_MODEL?.id ?? 'local-smart'
+
 const DEFAULT_SETTINGS: ApiSettings = {
-  endpoint: 'https://ark.cn-beijing.volces.com/api/v3',
+  endpoint: RECOMMENDED_FREE_MODEL?.baseUrl ?? '',
   apiKey: '',
-  modelName: 'doubao-pro-250615',
+  modelName: RECOMMENDED_FREE_MODEL?.modelName ?? '',
   temperature: 0.7,
   maxTokens: 2048,
   topP: 0.9,
@@ -150,7 +156,7 @@ export const useChatStore = create<ChatStore>()(
       setFontSize: (n) => set({ fontSize: n }),
       sidebarCollapsed: false,
       toggleSidebar: () => set({ sidebarCollapsed: !get().sidebarCollapsed }),
-      currentModelId: 'default',
+      currentModelId: DEFAULT_ACTIVE_MODEL_ID,
       currentPersonaId: 'general',
       get aiSettings() { return get().settings },
       setAiSettings: (partial) => set({ settings: { ...get().settings, ...partial } }),
@@ -158,6 +164,25 @@ export const useChatStore = create<ChatStore>()(
       setCurrentConversation: (id) => set({ activeSessionId: id }),
       setCurrentPersona: (id) => set({ activePersonaId: id }),
       setCurrentModel: (id) => set({ currentModelId: id }),
+
+      /** 根据模型 ID 切换模型（自动更新 endpoint + modelName） */
+      setModelById: (modelId: string) => {
+        if (modelId === 'local-smart') {
+          set({ currentModelId: 'local-smart' })
+          return
+        }
+        const model = getModelById(modelId)
+        if (model) {
+          set({
+            currentModelId: model.id,
+            settings: {
+              ...get().settings,
+              endpoint: model.baseUrl,
+              modelName: model.modelName,
+            },
+          })
+        }
+      },
       createConversation: (personaId, title) => get().createSession(personaId, title),
       deleteConversation: (id) => get().deleteSession(id),
       pinConversation: (id, pinned) => {
@@ -320,32 +345,139 @@ export const useChatStore = create<ChatStore>()(
 
         const controller = { aborted: false }
 
-        // 生成回复内容
-        const fullReply = generateReply(text, { persona, history })
+        // 决定使用哪个模型
+        const activeModelId = modelId || get().currentModelId
 
-        // 流式打字机效果
-        streamReply(
-          fullReply,
-          (_delta, full) => {
-            if (controller.aborted) return
-            set({
-              messages: get().messages.map((m) =>
-                m.id === assistantId ? { ...m, content: full, streaming: true } : m
-              ),
-            })
-          },
-          (full) => {
-            set({
-              messages: get().messages.map((m) =>
-                m.id === assistantId ? { ...m, content: full, streaming: false, tokens: full.length } : m
-              ),
-              sessions: get().sessions.map(s =>
-                s.id === sessionId ? { ...s, updatedAt: Date.now() } : s
-              ),
-            })
-          },
-          () => controller.aborted
-        )
+        // 构建系统消息（角色设定）
+        const systemContent = persona.systemPrompt
+          ? [{ role: 'system' as const, content: persona.systemPrompt }]
+          : []
+
+        // 构建发送给 API 的消息数组
+        const apiMessages: AChatMessage[] = [
+          ...systemContent,
+          ...history.map(h => ({ role: h.role as 'user' | 'assistant', content: h.content })),
+          { role: 'user', content: text },
+        ]
+
+        // 如果是本地引擎，直接用本地回复
+        if (activeModelId === 'local-smart' || activeModelId === 'local') {
+          const fullReply = generateReply(text, { persona, history })
+          streamReply(
+            fullReply,
+            (_delta, full) => {
+              if (controller.aborted) return
+              set({
+                messages: get().messages.map((m) =>
+                  m.id === assistantId ? { ...m, content: full, streaming: true } : m
+                ),
+              })
+            },
+            (full) => {
+              set({
+                messages: get().messages.map((m) =>
+                  m.id === assistantId ? { ...m, content: full, streaming: false, tokens: full.length } : m
+                ),
+                sessions: get().sessions.map(s =>
+                  s.id === sessionId ? { ...s, updatedAt: Date.now() } : s
+                ),
+              })
+            },
+            () => controller.aborted
+          )
+          return { abort: () => { controller.aborted = true } }
+        }
+
+        // 尝试真实 API 调用
+        const settings = get().settings
+        const hasKey = settings.apiKey && settings.apiKey.trim().length >= 8
+        const hasEndpoint = settings.endpoint && settings.endpoint.trim().length > 0
+        const hasModel = settings.modelName && settings.modelName.trim().length > 0
+
+        if (hasKey && hasEndpoint && hasModel) {
+          // 有 API Key，使用真实 API
+          const streamCb: StreamingCallbacks = {
+            onDelta: (delta) => {
+              if (controller.aborted) return
+              const current = get().messages.find(m => m.id === assistantId)
+              if (current) {
+                set({
+                  messages: get().messages.map((m) =>
+                    m.id === assistantId
+                      ? { ...m, content: (current.content || '') + delta, streaming: true }
+                      : m
+                  ),
+                })
+              }
+            },
+            onDone: (full) => {
+              set({
+                messages: get().messages.map((m) =>
+                  m.id === assistantId
+                    ? { ...m, content: full, streaming: false, tokens: Math.ceil(full.length * 0.75) }
+                    : m
+                ),
+                sessions: get().sessions.map(s =>
+                  s.id === sessionId ? { ...s, updatedAt: Date.now() } : s
+                ),
+              })
+            },
+            onError: (err) => {
+              console.warn('[API] 调用失败，降级到本地引擎:', err)
+              const localReply = generateReply(text, { persona, history })
+              set({
+                messages: get().messages.map((m) =>
+                  m.id === assistantId ? { ...m, content: localReply, streaming: false, tokens: localReply.length } : m
+                ),
+              })
+            },
+          }
+
+          chatCompletionStream(
+            apiMessages,
+            {
+              endpoint: settings.endpoint + '/chat/completions',
+              apiKey: settings.apiKey,
+              model: settings.modelName,
+              temperature: settings.temperature,
+              maxTokens: settings.maxTokens,
+              topP: settings.topP,
+            },
+            streamCb,
+            undefined,
+            { systemPrompt: persona.systemPrompt, name: persona.name, title: persona.name, description: persona.description }
+          )
+        } else {
+          // 没有 API Key，检查是否有任何平台的免费模型可以尝试
+          // 当前没有配置 API Key，显示引导信息
+          const noKeyReply = `${persona.emoji} 我想帮你回答，但目前还没有配置 API Key。\n\n**要启用真实 AI 模型，你需要配置 API Key：**\n\n1. 点击左上角「⚙️ 设置」\n2. 在「API Key」输入框中粘贴你的 Key\n3. 推荐申请 **OpenRouter**（一个 Key 用遍 30+ 免费模型）：\n   👉 https://openrouter.ai/\n\n目前我先用本地引擎回复你，虽然也能聊，但真实模型会智能很多哦～\n\n---\n\n**免费 Key 申请顺序（推荐）：**\n1️⃣ **OpenRouter** → 一个 Key + 30+ 免费模型\n2️⃣ **DeepSeek** → 实名送 50 万次/月\n3️⃣ **智谱 GLM** → 注册送 500 万 Token\n4️⃣ **硅基流动** → 注册送大量免费 Token\n`
+          const fullReply = generateReply(text, { persona, history })
+          const displayReply = hasEndpoint
+            ? fullReply // 有端点但无 Key，降级到本地
+            : noKeyReply // 完全无配置，显示引导
+          streamReply(
+            displayReply,
+            (_delta, full) => {
+              if (controller.aborted) return
+              set({
+                messages: get().messages.map((m) =>
+                  m.id === assistantId ? { ...m, content: full, streaming: true } : m
+                ),
+              })
+            },
+            (full) => {
+              set({
+                messages: get().messages.map((m) =>
+                  m.id === assistantId ? { ...m, content: full, streaming: false, tokens: full.length } : m
+                ),
+                sessions: get().sessions.map(s =>
+                  s.id === sessionId ? { ...s, updatedAt: Date.now() } : s
+                ),
+              })
+            },
+            () => controller.aborted
+          )
+        }
 
         return { abort: () => { controller.aborted = true } }
       },

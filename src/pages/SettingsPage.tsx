@@ -16,7 +16,16 @@ import {
   Download,
   Moon,
   Sun,
+  ChevronDown,
+  Star,
+  Crown,
+  ZapOff,
+  ExternalLink,
+  Sparkles,
+  Code,
+  BookOpen,
 } from 'lucide-react'
+import { MODELS, SORTED_MODELS, FREE_MODELS, getModelById, RECOMMENDED_FREE_MODEL } from '../lib/models'
 
 interface Preset {
   label: string
@@ -52,6 +61,59 @@ function downloadJson(filename: string, data: unknown): void {
   setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
+/** 模型选项行组件 */
+function FreeModelOption({
+  model,
+  selected,
+  onSelect,
+}: {
+  model: (typeof MODELS)[0]
+  selected: boolean
+  onSelect: () => void
+}) {
+  const tagIcons: Record<string, React.ComponentType<{ className?: string }>> = {
+    国产: () => <span className="text-[10px] px-1 py-0.5 bg-red-100 text-red-600 rounded">国产</span>,
+    免费: () => <span className="text-[10px] px-1 py-0.5 bg-green-100 text-green-600 rounded">免费</span>,
+    编程: () => <span className="text-[10px] px-1 py-0.5 bg-blue-100 text-blue-600 rounded">编程</span>,
+    开源: () => <span className="text-[10px] px-1 py-0.5 bg-purple-100 text-purple-600 rounded">开源</span>,
+    旗舰: () => <span className="text-[10px] px-1 py-0.5 bg-amber-100 text-amber-600 rounded">旗舰</span>,
+    Flash: () => <span className="text-[10px] px-1 py-0.5 bg-orange-100 text-orange-600 rounded">Flash</span>,
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      className={`w-full flex items-start gap-3 px-4 py-3 hover:bg-slate-50 transition text-left border-b border-slate-100 last:border-b-0 ${
+        selected ? 'bg-indigo-50 border-l-4 border-l-indigo-500' : ''
+      }`}
+    >
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 mb-0.5">
+          <div className="font-bold text-primary text-sm leading-tight">{model.name}</div>
+          {selected && <Check className="w-4 h-4 text-indigo-500 flex-shrink-0" />}
+        </div>
+        <div className="text-xs text-secondary leading-tight mb-1">{model.description}</div>
+        <div className="flex flex-wrap gap-1">
+          {model.tags.slice(0, 3).map(tag => {
+            const Icon = tagIcons[tag]
+            return Icon ? (
+              <Icon key={tag} />
+            ) : (
+              <span key={tag} className="text-[10px] px-1 py-0.5 bg-slate-100 text-slate-500 rounded">{tag}</span>
+            )
+          })}
+          {model.contextWindow && model.contextWindow > 0 && (
+            <span className="text-[10px] px-1 py-0.5 bg-slate-100 text-slate-500 rounded">
+              {model.contextWindow >= 1000000 ? `${(model.contextWindow / 1000000).toFixed(0)}M ctx` : `${(model.contextWindow / 1000).toFixed(0)}K ctx`}
+            </span>
+          )}
+        </div>
+      </div>
+    </button>
+  )
+}
+
 export default function SettingsPage(): React.ReactElement {
   const store = useChatStore()
   const {
@@ -79,6 +141,9 @@ export default function SettingsPage(): React.ReactElement {
   const [showApiKey, setShowApiKey] = useState<boolean>(false)
   const [savedMsg, setSavedMsg] = useState<boolean>(false)
   const [confirmClear, setConfirmClear] = useState<boolean>(false)
+  const [selectedModelId, setSelectedModelId] = useState<string>(store.currentModelId || RECOMMENDED_FREE_MODEL?.id || 'local-smart')
+  const [modelDropdownOpen, setModelDropdownOpen] = useState<boolean>(false)
+  const [showFreeGuide, setShowFreeGuide] = useState<boolean>(false)
 
   const hasApi = useMemo<boolean>(() => Boolean(endpoint.trim() && apiKey.trim()), [endpoint, apiKey])
 
@@ -96,8 +161,8 @@ export default function SettingsPage(): React.ReactElement {
   }
 
   const handleSave = (): void => {
-    const finalEndpoint = endpoint.trim() || DEFAULT_ENDPOINT
-    const finalModel = modelName.trim() || DEFAULT_MODEL
+    const finalEndpoint = endpoint.trim()
+    const finalModel = modelName.trim()
     updateSettings({
       endpoint: finalEndpoint,
       apiKey: apiKey.trim(),
@@ -106,6 +171,11 @@ export default function SettingsPage(): React.ReactElement {
       maxTokens: Math.max(200, Math.min(4096, Number(maxTokens) || 2048)),
       topP: Number(topP) || 0.9,
     })
+    // 保存模型选择
+    store.setCurrentModel(selectedModelId)
+    if (selectedModelId !== 'local-smart') {
+      store.setModelById(selectedModelId)
+    }
     setSavedMsg(true)
     window.setTimeout(() => setSavedMsg(false), 2000)
   }
@@ -191,90 +261,204 @@ export default function SettingsPage(): React.ReactElement {
           <p className="text-xs md:text-sm text-secondary mt-1">自定义 DataMind AI · 让它成为你的专属 AI 助手</p>
         </div>
 
-        {/* ========== 一、AI API 配置卡片 ========== */}
+        {/* ========== 一、AI 模型选择 ========== */}
         <section className="bg-white rounded-2xl shadow-sm border border-theme overflow-hidden">
-          <header className="px-4 md:px-6 py-4 bg-gradient-to-r from-indigo-500 to-violet-600 text-white flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <Brain className="w-5 h-5 flex-shrink-0" />
-              <div>
-                <div className="text-sm md:text-base font-bold">🧠 AI 模型 API</div>
-                <div className="text-xs opacity-90">配置豆包 / OpenAI 兼容大模型接口，获得真实流式对话</div>
-              </div>
-            </div>
-            <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold flex-shrink-0 ${
-                hasApi ? 'bg-green-500/20 text-green-50 ring-1 ring-green-200/60' : 'bg-sky-500/20 text-sky-50 ring-1 ring-sky-200/60'
-              }`}
-            >
-              {hasApi ? (
-                <>
-                  <Check className="w-3.5 h-3.5" />
-                  已连接真实大模型
-                </>
-              ) : (
-                <>
-                  <Brain className="w-3.5 h-3.5" />
-                  本地智能引擎运行中
-                </>
-              )}
+          <header className="px-4 md:px-6 py-4 bg-gradient-to-r from-indigo-500 to-violet-600 text-white flex items-center gap-3">
+            <Sparkles className="w-5 h-5 flex-shrink-0" />
+            <div>
+              <div className="text-sm md:text-base font-bold">🤖 模型中心</div>
+              <div className="text-xs opacity-90">选择一个 AI 模型，即可开始对话。全部模型均支持 OpenAI 兼容接口。</div>
             </div>
           </header>
 
           <div className="p-4 md:p-6 space-y-5">
-            <div className="flex items-center justify-between bg-slate-50 border border-theme rounded-xl px-3 py-2.5 text-xs">
-              <span className="text-secondary">当前使用模型</span>
-              <span className="font-bold text-primary font-mono">{modelName || DEFAULT_MODEL}</span>
-            </div>
 
+            {/* 模型选择下拉 */}
             <div>
-              <div className="text-xs font-bold text-primary mb-2 flex items-center gap-1.5">
-                <Zap className="w-3.5 h-3.5 text-amber-500" /> 快速填充模板
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {PRESETS.map((p) => (
-                  <button
-                    key={p.label}
-                    type="button"
-                    onClick={() => applyPreset(p)}
-                    className="text-xs px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg font-medium transition flex items-center gap-1.5"
-                  >
-                    <Zap className="w-3 h-3" /> {p.label}
-                  </button>
-                ))}
-                <button
-                  type="button"
-                  onClick={handleClearConfig}
-                  className="text-xs px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg font-medium transition flex items-center gap-1.5"
-                >
-                  <RefreshCw className="w-3 h-3" /> 清除配置（回到本地引擎）
-                </button>
-              </div>
-            </div>
-
-            <div className="border-t border-theme" />
-
-            <div>
-              <label className="text-xs font-bold text-primary mb-1.5 block flex items-center gap-1.5">
-                <Globe className="w-3.5 h-3.5 text-indigo-500" /> API 服务地址
+              <label className="text-xs font-bold text-primary mb-2 flex items-center gap-1.5">
+                <Crown className="w-3.5 h-3.5 text-amber-500" /> 选择 AI 模型
               </label>
-              <input
-                type="text"
-                value={endpoint}
-                onChange={(e) => setEndpoint(e.target.value)}
-                placeholder="https://ark.cn-beijing.volces.com/api/v3"
-                className="w-full px-3 py-2.5 border border-theme rounded-xl text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 bg-slate-50 focus:bg-white transition font-mono"
-              />
+
+              {/* 已选模型展示 */}
+              <button
+                type="button"
+                onClick={() => setModelDropdownOpen(!modelDropdownOpen)}
+                className="w-full flex items-center justify-between px-4 py-3 border-2 border-indigo-200 rounded-xl bg-indigo-50 hover:bg-indigo-100 transition text-left"
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <span className="text-xl flex-shrink-0">
+                    {selectedModelId === 'local-smart' ? '🌐' : '🔗'}
+                  </span>
+                  <div className="min-w-0">
+                    <div className="font-bold text-primary text-sm">
+                      {selectedModelId === 'local-smart'
+                        ? '🌐 本地智能引擎'
+                        : (getModelById(selectedModelId)?.name ?? selectedModelId)}
+                    </div>
+                    <div className="text-xs text-secondary truncate">
+                      {selectedModelId === 'local-smart'
+                        ? '完全免费，无需 API Key'
+                        : (getModelById(selectedModelId)?.freeQuota ?? '')}
+                    </div>
+                  </div>
+                </div>
+                <ChevronDown className={`w-4 h-4 text-indigo-400 flex-shrink-0 transition-transform ${modelDropdownOpen ? 'rotate-180' : ''}`} />
+              </button>
+
+              {/* 模型下拉面板 */}
+              {modelDropdownOpen && (
+                <div className="mt-2 border border-indigo-200 rounded-xl overflow-hidden shadow-lg bg-white">
+                  {/* 免费模型优先展示 */}
+                  <div className="px-3 py-2 bg-green-50 border-b border-green-100">
+                    <div className="text-xs font-bold text-green-700 flex items-center gap-1">
+                      <Star className="w-3 h-3" /> 免费模型（推荐）
+                    </div>
+                  </div>
+                  {/* 本地引擎 */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedModelId('local-smart')
+                      setEndpoint('')
+                      setModelName('')
+                      setModelDropdownOpen(false)
+                    }}
+                    className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-slate-50 transition text-left border-b border-slate-100 ${selectedModelId === 'local-smart' ? 'bg-indigo-50 border-l-4 border-l-indigo-500' : ''}`}
+                  >
+                    <span className="text-xl flex-shrink-0">🌐</span>
+                    <div className="min-w-0 flex-1">
+                      <div className="font-bold text-primary text-sm">本地智能引擎</div>
+                      <div className="text-xs text-secondary">完全免费 · 无需 API Key · 离线可用</div>
+                    </div>
+                    {selectedModelId === 'local-smart' && <Check className="w-4 h-4 text-indigo-500 flex-shrink-0" />}
+                  </button>
+
+                  {/* 免费模型列表 */}
+                  {FREE_MODELS.filter(m => m.id !== 'local-smart').map(model => (
+                    <FreeModelOption
+                      key={model.id}
+                      model={model}
+                      selected={selectedModelId === model.id}
+                      onSelect={() => {
+                        setSelectedModelId(model.id)
+                        setEndpoint(model.baseUrl)
+                        setModelName(model.modelName)
+                        setModelDropdownOpen(false)
+                      }}
+                    />
+                  ))}
+
+                  {/* 付费模型 */}
+                  {SORTED_MODELS.filter(m => !m.isFree).length > 0 && (
+                    <>
+                      <div className="px-3 py-2 bg-slate-50 border-t border-slate-200 border-b">
+                        <div className="text-xs font-bold text-slate-600">付费 / 注册送额度</div>
+                      </div>
+                      {SORTED_MODELS.filter(m => !m.isFree).slice(0, 15).map(model => (
+                        <FreeModelOption
+                          key={model.id}
+                          model={model}
+                          selected={selectedModelId === model.id}
+                          onSelect={() => {
+                            setSelectedModelId(model.id)
+                            setEndpoint(model.baseUrl)
+                            setModelName(model.modelName)
+                            setModelDropdownOpen(false)
+                          }}
+                        />
+                      ))}
+                    </>
+                  )}
+                </div>
+              )}
             </div>
 
+            {/* 免费 Key 申请引导 */}
+            {selectedModelId !== 'local-smart' && (
+              <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl px-4 py-3">
+                <div className="text-xs font-bold text-blue-700 mb-2 flex items-center gap-1.5">
+                  <Zap className="w-3.5 h-3.5" /> 如何获取免费 API Key
+                </div>
+                <div className="space-y-1.5 text-xs text-blue-800">
+                  <div className="flex items-start gap-1.5">
+                    <span className="font-bold text-blue-600 flex-shrink-0">1.</span>
+                    <span>打开模型官网注册账号（如 <b>openrouter.ai</b> 或各厂商开放平台）</span>
+                  </div>
+                  <div className="flex items-start gap-1.5">
+                    <span className="font-bold text-blue-600 flex-shrink-0">2.</span>
+                    <span>在「API Keys」页面创建新 Key，复制粘贴到下方输入框</span>
+                  </div>
+                  <div className="flex items-start gap-1.5">
+                    <span className="font-bold text-blue-600 flex-shrink-0">3.</span>
+                    <span>点击保存，模型会自动切换，选好后直接开始对话</span>
+                  </div>
+                </div>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  <a href="https://openrouter.ai/" target="_blank" rel="noopener noreferrer"
+                    className="text-xs px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition flex items-center gap-1">
+                    OpenRouter <ExternalLink className="w-3 h-3" />
+                  </a>
+                  <a href="https://platform.deepseek.com/" target="_blank" rel="noopener noreferrer"
+                    className="text-xs px-2.5 py-1 bg-slate-700 hover:bg-slate-800 text-white rounded-lg font-medium transition flex items-center gap-1">
+                    DeepSeek <ExternalLink className="w-3 h-3" />
+                  </a>
+                  <a href="https://platform.moonshot.cn/" target="_blank" rel="noopener noreferrer"
+                    className="text-xs px-2.5 py-1 bg-slate-700 hover:bg-slate-800 text-white rounded-lg font-medium transition flex items-center gap-1">
+                    Kimi <ExternalLink className="w-3 h-3" />
+                  </a>
+                  <a href="https://siliconflow.cn/" target="_blank" rel="noopener noreferrer"
+                    className="text-xs px-2.5 py-1 bg-slate-700 hover:bg-slate-800 text-white rounded-lg font-medium transition flex items-center gap-1">
+                    硅基流动 <ExternalLink className="w-3 h-3" />
+                  </a>
+                </div>
+              </div>
+            )}
+          </div>
+        </section>
+
+        {/* ========== 二、API Key 配置卡片 ========== */}
+        <section className="bg-white rounded-2xl shadow-sm border border-theme overflow-hidden">
+          <header className="px-4 md:px-6 py-4 bg-gradient-to-r from-violet-500 to-purple-600 text-white flex items-center gap-3">
+            <Key className="w-5 h-5 flex-shrink-0" />
+            <div>
+              <div className="text-sm md:text-base font-bold">🔑 API Key 配置</div>
+              <div className="text-xs opacity-90">配置后即可调用真实 AI 模型，本地存储，不上传</div>
+            </div>
+            <div className={`ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold flex-shrink-0 ${
+                hasApi ? 'bg-green-500/20 text-green-50' : 'bg-white/20 text-white/80'
+              }`}
+            >
+              {hasApi ? <><Check className="w-3.5 h-3.5" /> 已配置</> : <><ZapOff className="w-3.5 h-3.5" /> 未配置</>}
+            </div>
+          </header>
+
+          <div className="p-4 md:p-6 space-y-5">
+
+            {/* 已选模型信息 */}
+            <div className="flex items-center justify-between bg-slate-50 border border-theme rounded-xl px-3 py-2.5 text-xs">
+              <span className="text-secondary">当前选择</span>
+              <div className="text-right">
+                <div className="font-bold text-primary font-mono">{modelName || '本地引擎'}</div>
+                {endpoint && <div className="text-secondary font-mono text-[10px] truncate max-w-[200px]">{endpoint}</div>}
+              </div>
+            </div>
+
+            {/* API Key 输入 */}
             <div>
               <label className="text-xs font-bold text-primary mb-1.5 block flex items-center gap-1.5">
                 <Key className="w-3.5 h-3.5 text-violet-500" /> API Key
+                {selectedModelId !== 'local-smart' && (
+                  <span className="text-xs font-normal text-slate-400">(必填)</span>
+                )}
               </label>
               <div className="relative">
                 <input
                   type={showApiKey ? 'text' : 'password'}
                   value={apiKey}
                   onChange={(e) => setApiKey(e.target.value)}
-                  placeholder="填入你的 API Key（本地加密存储，仅用于浏览器内请求）"
+                  placeholder={selectedModelId === 'local-smart'
+                    ? '本地引擎无需 Key，可留空'
+                    : '粘贴你的 API Key（sk-... 或 apikey-...）'}
                   className="w-full pr-12 px-3 py-2.5 border border-theme rounded-xl text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 bg-slate-50 focus:bg-white transition font-mono"
                 />
                 <button
@@ -288,19 +472,39 @@ export default function SettingsPage(): React.ReactElement {
               </div>
             </div>
 
+            {/* 模型名称（自动填充） */}
             <div>
-              <label className="text-xs font-bold text-primary mb-1.5 block">模型名称</label>
+              <label className="text-xs font-bold text-primary mb-1.5 block flex items-center gap-1.5">
+                <Code className="w-3.5 h-3.5 text-indigo-500" /> 模型名称
+                <span className="text-xs font-normal text-slate-400">(自动填充，可手动修改)</span>
+              </label>
               <input
                 type="text"
                 value={modelName}
                 onChange={(e) => setModelName(e.target.value)}
-                placeholder="doubao-pro-250615 或 gpt-4o-mini 等"
+                placeholder="选择模型后自动填入"
+                className="w-full px-3 py-2.5 border border-theme rounded-xl text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 bg-slate-50 focus:bg-white transition font-mono"
+              />
+            </div>
+
+            {/* 端点（自动填充） */}
+            <div>
+              <label className="text-xs font-bold text-primary mb-1.5 block flex items-center gap-1.5">
+                <Globe className="w-3.5 h-3.5 text-indigo-500" /> API 端点
+                <span className="text-xs font-normal text-slate-400">(自动填充，可手动修改)</span>
+              </label>
+              <input
+                type="text"
+                value={endpoint}
+                onChange={(e) => setEndpoint(e.target.value)}
+                placeholder="选择模型后自动填入"
                 className="w-full px-3 py-2.5 border border-theme rounded-xl text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 bg-slate-50 focus:bg-white transition font-mono"
               />
             </div>
 
             <div className="border-t border-theme" />
 
+            {/* 高级参数 */}
             <div>
               <div className="text-xs font-bold text-primary mb-2 flex items-center gap-1.5">
                 <Sliders className="w-3.5 h-3.5 text-indigo-500" /> 高级参数
@@ -373,7 +577,7 @@ export default function SettingsPage(): React.ReactElement {
           </div>
         </section>
 
-        {/* ========== 二、外观与界面 ========== */}
+        {/* ========== 三、外观与界面 ========== */}
         <section className="bg-white rounded-2xl shadow-sm border border-theme overflow-hidden">
           <header className="px-4 md:px-6 py-4 bg-gradient-to-r from-slate-700 to-slate-900 text-white flex items-center gap-2">
             <Sun className="w-5 h-5" />
