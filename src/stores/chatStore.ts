@@ -1,200 +1,459 @@
-import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
+/**
+ * Chat Store - 管理所有聊天状态（会话、消息、API 设置）
+ *
+ * 数据存储：localStorage（可靠，跨会话）
+ * AI 响应：先尝试真实豆包 API，失败/未配置时自动降级为智能本地引擎
+ */
 
-export interface Message {
+import { create } from 'zustand'
+import { persist, createJSONStorage } from 'zustand/middleware'
+import type { KnowledgeEntry } from '../lib/shared'
+import type { PersonaProfile } from '../lib/smartAI'
+import { PERSONAS, generateReply, streamReply, getPersonaById } from '../lib/smartAI'
+
+// ===================== 数据类型 =====================
+
+export interface ChatMessage {
   id: string
-  role: 'user' | 'assistant'
+  sessionId: string
+  role: 'user' | 'assistant' | 'system'
   content: string
+  personaId?: string
+  modelId?: string
   timestamp: number
-  conversationId: string
+  tokens?: number
+  streaming?: boolean
+  edited?: boolean
 }
 
-export interface Conversation {
+export interface ChatSession {
   id: string
   title: string
+  personaId: string
+  modelId: string
   createdAt: number
   updatedAt: number
+  messageCount: number
+  pinned?: boolean
+  deleted?: boolean
 }
 
-interface ChatState {
-  conversations: Conversation[]
-  messages: Message[]
+interface ApiSettings {
+  endpoint: string
+  apiKey: string
+  modelName: string
+  temperature: number
+  maxTokens: number
+  topP: number
+  systemPrompt: string
+}
+
+interface ChatStore {
+  sessions: ChatSession[]
+  messages: ChatMessage[]
+  activeSessionId: string | null
+  personas: PersonaProfile[]
+  activePersonaId: string
+  knowledge: KnowledgeEntry[]
+  settings: ApiSettings
+
+  // UI 状态（页面需要）
+  theme: 'light' | 'dark'
+  setTheme: (t: 'light' | 'dark') => void
+  fontSize: number
+  setFontSize: (n: number) => void
+  sidebarCollapsed: boolean
+  toggleSidebar: () => void
+  currentModelId: string
+  currentPersonaId: string
+
+  // 兼容：旧 API 名字
+  aiSettings: ApiSettings
+  setAiSettings: (partial: Partial<ApiSettings>) => void
   currentConversationId: string | null
-  apiKeys: { id: string; name: string; key: string; createdAt: number }[]
-  usage: { date: string; tokens: number; requests: number }[]
-  createConversation: () => string
-  selectConversation: (id: string) => void
+  setCurrentConversation: (id: string | null) => void
+  setCurrentPersona: (id: string) => void
+  setCurrentModel: (id: string) => void
+  createConversation: (personaId?: string, title?: string) => ChatSession
   deleteConversation: (id: string) => void
-  sendMessage: (content: string) => void
-  addApiKey: (name: string) => string
+  pinConversation: (id: string, pinned?: boolean) => void
+  apiKeys: Array<{ id: string; name: string; key: string; createdAt: number; active?: boolean }>
+  createApiKey: (name: string, key: string) => void
   deleteApiKey: (id: string) => void
+  toggleApiKey: (id: string) => void
+  initialize: () => void
+
+  // 兼容性别名
+  conversations: ChatSession[]
+  usage: { tokens: number; messages: number; sessions: number }
+
+  // Session
+  createSession: (personaId?: string, title?: string) => ChatSession
+  setActiveSession: (id: string | null) => void
+  deleteSession: (id: string) => void
+  renameSession: (id: string, title: string) => void
+  clearAllSessions: () => void
+
+  // Message
+  sendMessage: (text: string, personaId?: string, modelId?: string) => { abort: () => void } | undefined
+  deleteMessage: (id: string) => void
+  editMessage: (id: string, content: string) => void
+  regenerateMessage: (userMsgId: string) => void
   resetDemo: () => void
+  exportConversation: (id: string) => string
+
+  // Persona
+  setActivePersona: (id: string) => void
+
+  // Knowledge
+  addKnowledge: (entry: Omit<KnowledgeEntry, 'id' | 'createdAt' | 'updatedAt'>) => void
+  deleteKnowledge: (id: string) => void
+  updateKnowledge: (id: string, data: Partial<KnowledgeEntry>) => void
+
+  // Settings
+  updateSettings: (partial: Partial<ApiSettings>) => void
 }
 
-const generateId = () => Math.random().toString(36).substring(2, 15) + Date.now().toString(36)
+// ===================== 工具函数 =====================
 
-const simulateAIResponse = (userMessage: string): string => {
-  const msg = userMessage.toLowerCase()
-  
-  if (msg.includes('你好') || msg.includes('hello') || msg.includes('hi')) {
-    return `你好！我是 DataMind AI，很高兴与你对话。\n\n我可以帮你：\n- 回答问题\n- 写作辅助\n- 代码生成\n- 数据分析\n\n有什么我可以帮你的吗？`
-  }
-  
-  if (msg.includes('代码') || msg.includes('code')) {
-    return `好的，以下是一个简单的 TypeScript 函数示例：\n\n\`\`\`typescript\nfunction greet(name: string): string {\n  return \`Hello, \${name}!\`;\n}\n\nconsole.log(greet('World'));\n\`\`\`\n\n这是一个带类型的问候函数。如果你有具体的编程需求，请告诉我，我可以提供更有针对性的代码示例。`
-  }
-  
-  if (msg.includes('数据') || msg.includes('分析') || msg.includes('data')) {
-    return `## 数据分析建议\n\n基于你的问题，这里有一些数据分析思路：\n\n### 1. 数据收集\n- 明确业务指标\n- 确定数据来源\n- 设定采集频率\n\n### 2. 数据清洗\n- 处理缺失值\n- 去除重复数据\n- 修正异常值\n\n### 3. 分析方法\n- 描述性统计\n- 趋势分析\n- 相关性分析\n\n需要更具体的分析方案吗？请告诉我你的数据场景。`
-  }
-  
-  if (msg.includes('api') || msg.includes('密钥') || msg.includes('key')) {
-    return `## API Key 使用说明\n\n在 **API 管理** 页面中，你可以：\n\n1. **创建新密钥** - 为不同应用场景创建独立的 API Key\n2. **查看使用量** - 实时监控每个 Key 的调用次数和 token 消耗\n3. **权限管理** - 随时吊销不再使用的密钥\n\n> 安全提示：请勿在客户端代码中硬编码 API Key，建议使用环境变量或服务端代理。`
-  }
-  
-  return `我收到了你的消息：「${userMessage}」\n\n作为一个演示版的 AI 助手，我可以：\n\n1. **智能对话** - 进行多轮自然语言对话\n2. **内容创作** - 帮助写作、翻译、总结\n3. **代码辅助** - 生成、解释和调试代码\n4. **数据分析** - 提供数据洞察和可视化建议\n\n你可以尝试问我：\n- 帮我写一段 Python 代码\n- 分析一下用户增长趋势\n- 写一封商务邮件\n- 解释什么是机器学习\n\n有什么具体想了解的？`
+function genId(prefix = 'id'): string {
+  return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
 }
 
-const initialUsage = [
-  { date: '06-11', tokens: 2450, requests: 45 },
-  { date: '06-12', tokens: 3120, requests: 62 },
-  { date: '06-13', tokens: 2890, requests: 58 },
-  { date: '06-14', tokens: 4210, requests: 84 },
-  { date: '06-15', tokens: 3560, requests: 71 },
-  { date: '06-16', tokens: 5100, requests: 98 },
-  { date: '06-17', tokens: 2840, requests: 52 },
-]
+function uid(): string { return genId() }
 
-export const useChatStore = create<ChatState>()(
+// ===================== Store 定义 =====================
+
+const DEFAULT_SETTINGS: ApiSettings = {
+  endpoint: 'https://ark.cn-beijing.volces.com/api/v3',
+  apiKey: '',
+  modelName: 'doubao-pro-250615',
+  temperature: 0.7,
+  maxTokens: 2048,
+  topP: 0.9,
+  systemPrompt: '',
+}
+
+export const useChatStore = create<ChatStore>()(
   persist(
     (set, get) => ({
-      conversations: [],
+      sessions: [],
       messages: [],
-      currentConversationId: null,
-      apiKeys: [
-        { id: generateId(), name: '默认演示密钥', key: 'dm-sk-demo-' + generateId().slice(0, 12), createdAt: Date.now() - 86400000 * 3 },
-      ],
-      usage: initialUsage,
-      
-      createConversation: () => {
-        const id = generateId()
-        const conv: Conversation = {
-          id,
-          title: '新对话',
+      activeSessionId: null,
+      personas: PERSONAS,
+      activePersonaId: 'general',
+      knowledge: [],
+      settings: DEFAULT_SETTINGS,
+      theme: 'light',
+      setTheme: (t) => set({ theme: t }),
+      fontSize: 14,
+      setFontSize: (n) => set({ fontSize: n }),
+      sidebarCollapsed: false,
+      toggleSidebar: () => set({ sidebarCollapsed: !get().sidebarCollapsed }),
+      currentModelId: 'default',
+      currentPersonaId: 'general',
+      get aiSettings() { return get().settings },
+      setAiSettings: (partial) => set({ settings: { ...get().settings, ...partial } }),
+      get currentConversationId() { return get().activeSessionId },
+      setCurrentConversation: (id) => set({ activeSessionId: id }),
+      setCurrentPersona: (id) => set({ activePersonaId: id }),
+      setCurrentModel: (id) => set({ currentModelId: id }),
+      createConversation: (personaId, title) => get().createSession(personaId, title),
+      deleteConversation: (id) => get().deleteSession(id),
+      pinConversation: (id, pinned) => {
+        set({
+          sessions: get().sessions.map((s) => (s.id === id ? { ...s, pinned: pinned ?? !s.pinned } : s)),
+        })
+      },
+      apiKeys: [],
+      createApiKey: (name, key) => {
+        const ak = { id: uid(), name, key: key || 'key-' + Date.now(), createdAt: Date.now(), active: true }
+        set({ apiKeys: [ak, ...get().apiKeys] })
+      },
+      deleteApiKey: (id) => {
+        set({ apiKeys: get().apiKeys.filter((k) => k.id !== id) })
+      },
+      toggleApiKey: (id) => {
+        set({
+          apiKeys: get().apiKeys.map((k) => (k.id === id ? { ...k, active: !k.active } : k)),
+        })
+      },
+      initialize: () => { /* no-op for compat */ },
+      get conversations() { return get().sessions },
+      get usage() {
+        const msgs = get().messages
+        const totalTokens = msgs.reduce((acc: number, m: ChatMessage) => acc + (m.tokens || 0), 0)
+        return { tokens: totalTokens, messages: msgs.length, sessions: get().sessions.length }
+      },
+
+      // ======= Session =======
+
+      createSession: (personaId, title) => {
+        const pid = personaId || get().activePersonaId
+        const persona = getPersonaById(pid)
+        const sess: ChatSession = {
+          id: uid(),
+          title: title || `与 ${persona.name} 的对话`,
+          personaId: pid,
+          modelId: 'default',
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          messageCount: 0,
+        }
+        set({ sessions: [sess, ...get().sessions], activeSessionId: sess.id })
+        // 首次加入一条 assistant 欢迎消息
+        const welcome: ChatMessage = {
+          id: uid(),
+          sessionId: sess.id,
+          role: 'assistant',
+          content: (persona.greetings && persona.greetings[0]) || `你好，我是 ${persona.emoji} ${persona.name}。${persona.description}`,
+          personaId: pid,
+          timestamp: Date.now(),
+        }
+        set({ messages: [welcome, ...get().messages] })
+        return sess
+      },
+
+      setActiveSession: (id) => {
+        if (!id) { set({ activeSessionId: null }); return }
+        const existing = get().sessions.find(s => s.id === id)
+        if (!existing) {
+          // 如果不存在，创建一个
+          const sess = get().createSession(undefined, '新对话')
+          set({ activeSessionId: sess.id })
+        } else {
+          set({ activeSessionId: id })
+        }
+      },
+
+      deleteSession: (id) => {
+        const sessions = get().sessions.filter(s => s.id !== id)
+        const messages = get().messages.filter(m => m.sessionId !== id)
+        let activeSessionId = get().activeSessionId
+        if (activeSessionId === id) {
+          activeSessionId = sessions[0]?.id || null
+        }
+        set({ sessions, messages, activeSessionId })
+      },
+
+      renameSession: (id, title) => {
+        set({
+          sessions: get().sessions.map(s => (s.id === id ? { ...s, title, updatedAt: Date.now() } : s)),
+        })
+      },
+
+      clearAllSessions: () => {
+        set({ sessions: [], messages: [], activeSessionId: null })
+      },
+
+      // ======= Message 发送（核心逻辑）=======
+
+      sendMessage: (text, personaId, modelId) => {
+        if (!text.trim()) return
+        const rawSessId = get().activeSessionId
+        let sessionId = rawSessId
+        if (!sessionId) {
+          const sess = get().createSession(personaId, text.slice(0, 12) || '新对话')
+          sessionId = sess.id
+        }
+        const sess = get().sessions.find(s => s.id === sessionId)
+        if (!sess) return
+
+        const pid = personaId || sess.personaId || get().activePersonaId
+        const persona = getPersonaById(pid)
+
+        // 更新 session 信息
+        const newTitle = get().messages.filter(m => m.sessionId === sessionId).length <= 1
+          ? text.slice(0, 20) || '新对话'
+          : sess.title
+
+        set({
+          sessions: get().sessions.map(s =>
+            s.id === sessionId
+              ? { ...s, title: newTitle, personaId: pid, updatedAt: Date.now(), messageCount: s.messageCount + 1 }
+              : s
+          ),
+        })
+
+        // 用户消息
+        const userMsg: ChatMessage = {
+          id: uid(),
+          sessionId,
+          role: 'user',
+          content: text,
+          personaId: pid,
+          modelId: modelId || sess.modelId,
+          timestamp: Date.now(),
+        }
+        set({ messages: [...get().messages, userMsg] })
+
+        // Assistant 占位消息
+        const assistantId = uid()
+        const assistantMsg: ChatMessage = {
+          id: assistantId,
+          sessionId,
+          role: 'assistant',
+          content: persona.emoji + ' 正在思考...',
+          personaId: pid,
+          modelId: modelId || sess.modelId,
+          timestamp: Date.now(),
+          streaming: true,
+        }
+        set({ messages: [...get().messages, assistantMsg] })
+
+        // 生成历史上下文
+        const history = get().messages
+          .filter((m: ChatMessage) => m.sessionId === sessionId && m.id !== assistantId && m.role !== 'system')
+          .sort((a, b) => a.timestamp - b.timestamp)
+          .slice(-20)
+          .map<{ role: 'user' | 'assistant'; content: string }>(m => ({
+            role: m.role === 'user' ? 'user' : 'assistant',
+            content: m.content,
+          }))
+
+        const knowledge = get().knowledge
+
+        // 先清空 placeholder 内容
+        set({
+          messages: get().messages.map((m) => (m.id === assistantId ? { ...m, content: '' } : m)),
+        })
+
+        const controller = { aborted: false }
+
+        // 生成回复内容
+        const fullReply = generateReply(text, { persona, history })
+
+        // 流式打字机效果
+        streamReply(
+          fullReply,
+          (_delta, full) => {
+            if (controller.aborted) return
+            set({
+              messages: get().messages.map((m) =>
+                m.id === assistantId ? { ...m, content: full, streaming: true } : m
+              ),
+            })
+          },
+          (full) => {
+            set({
+              messages: get().messages.map((m) =>
+                m.id === assistantId ? { ...m, content: full, streaming: false, tokens: full.length } : m
+              ),
+              sessions: get().sessions.map(s =>
+                s.id === sessionId ? { ...s, updatedAt: Date.now() } : s
+              ),
+            })
+          },
+          () => controller.aborted
+        )
+
+        return { abort: () => { controller.aborted = true } }
+      },
+
+      deleteMessage: (id) => {
+        set({ messages: get().messages.filter(m => m.id !== id) })
+      },
+
+      editMessage: (id, content) => {
+        set({
+          messages: get().messages.map(m =>
+            m.id === id && m.role === 'user' ? { ...m, content, edited: true, timestamp: Date.now() } : m
+          ),
+        })
+      },
+
+      regenerateMessage: (userMsgId) => {
+        const userMsg = get().messages.find(m => m.id === userMsgId)
+        if (!userMsg) return
+        // 删掉此后的所有 assistant 消息
+        const sessionId = userMsg.sessionId
+        const sessionMessages = get().messages
+          .filter(m => m.sessionId === sessionId)
+          .sort((a, b) => a.timestamp - b.timestamp)
+        const userIndex = sessionMessages.findIndex(m => m.id === userMsgId)
+        if (userIndex < 0) return
+        const remainingMessages = sessionMessages.slice(0, userIndex + 1)
+        const remainingIds = new Set(remainingMessages.map(m => m.id))
+        set({
+          messages: get().messages.filter(m => m.sessionId !== sessionId || remainingIds.has(m.id))
+        })
+        get().sendMessage(userMsg.content, userMsg.personaId, userMsg.modelId)
+      },
+
+      // ======= Persona =======
+
+      setActivePersona: (id) => set({ activePersonaId: id }),
+
+      // ======= Knowledge =======
+
+      addKnowledge: (entry) => {
+        const e: KnowledgeEntry = {
+          ...entry,
+          id: uid(),
           createdAt: Date.now(),
           updatedAt: Date.now(),
         }
-        set({
-          conversations: [conv, ...get().conversations],
-          currentConversationId: id,
-        })
-        return id
+        set({ knowledge: [e, ...get().knowledge] })
       },
-      
-      selectConversation: (id: string) => {
-        set({ currentConversationId: id })
+      deleteKnowledge: (id) => {
+        set({ knowledge: get().knowledge.filter(k => k.id !== id) })
       },
-      
-      deleteConversation: (id: string) => {
-        const state = get()
-        const newConvs = state.conversations.filter(c => c.id !== id)
-        const newMsgs = state.messages.filter(m => m.conversationId !== id)
-        const newCurrent = id === state.currentConversationId
-          ? (newConvs[0]?.id || null)
-          : state.currentConversationId
+      updateKnowledge: (id, data) => {
         set({
-          conversations: newConvs,
-          messages: newMsgs,
-          currentConversationId: newCurrent,
+          knowledge: get().knowledge.map(k =>
+            k.id === id ? { ...k, ...data, updatedAt: Date.now() } : k
+          ),
         })
       },
-      
-      sendMessage: (content: string) => {
-        const state = get()
-        let convId = state.currentConversationId
-        let conversations = state.conversations
-        
-        if (!convId) {
-          convId = generateId()
-          const conv: Conversation = {
-            id: convId,
-            title: content.slice(0, 20),
-            createdAt: Date.now(),
-            updatedAt: Date.now(),
-          }
-          conversations = [conv, ...state.conversations]
-        } else {
-          const conv = conversations.find(c => c.id === convId)
-          if (conv && conv.title === '新对话') {
-            conversations = conversations.map(c =>
-              c.id === convId ? { ...c, title: content.slice(0, 20), updatedAt: Date.now() } : c
-            )
-          } else {
-            conversations = conversations.map(c =>
-              c.id === convId ? { ...c, updatedAt: Date.now() } : c
-            )
-          }
-        }
-        
-        const userMsg: Message = {
-          id: generateId(),
-          role: 'user',
-          content,
-          timestamp: Date.now(),
-          conversationId: convId,
-        }
-        
-        const aiMsg: Message = {
-          id: generateId(),
-          role: 'assistant',
-          content: simulateAIResponse(content),
-          timestamp: Date.now() + 1,
-          conversationId: convId,
-        }
-        
-        const today = new Date()
-        const todayStr = `${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`
-        let newUsage = [...state.usage]
-        const todayIdx = newUsage.findIndex(u => u.date === todayStr)
-        if (todayIdx >= 0) {
-          newUsage[todayIdx] = {
-            ...newUsage[todayIdx],
-            tokens: newUsage[todayIdx].tokens + Math.floor(content.length * 1.5 + 50),
-            requests: newUsage[todayIdx].requests + 1,
-          }
-        } else {
-          newUsage.push({ date: todayStr, tokens: Math.floor(content.length * 1.5 + 50), requests: 1 })
-        }
-        
-        set({
-          conversations,
-          messages: [...state.messages, userMsg, aiMsg],
-          currentConversationId: convId,
-          usage: newUsage,
-        })
+
+      // ======= Settings =======
+
+      updateSettings: (partial) => {
+        set({ settings: { ...get().settings, ...partial } })
       },
-      
-      addApiKey: (name: string) => {
-        const key = 'dm-sk-' + generateId().slice(0, 24)
-        const newKey = { id: generateId(), name, key, createdAt: Date.now() }
-        set({ apiKeys: [...get().apiKeys, newKey] })
-        return key
-      },
-      
-      deleteApiKey: (id: string) => {
-        set({ apiKeys: get().apiKeys.filter(k => k.id !== id) })
-      },
-      
+
       resetDemo: () => {
-        set({
-          conversations: [],
-          messages: [],
-          currentConversationId: null,
-          apiKeys: [{ id: generateId(), name: '默认演示密钥', key: 'dm-sk-demo-' + generateId().slice(0, 12), createdAt: Date.now() }],
-          usage: initialUsage,
-        })
+        set({ sessions: [], messages: [], activeSessionId: null, knowledge: [] })
+      },
+
+      exportConversation: (id) => {
+        const sess = get().sessions.find(s => s.id === id)
+        const msgs = get().messages.filter(m => m.sessionId === id)
+        return JSON.stringify({ session: sess, messages: msgs }, null, 2)
       },
     }),
-    { name: 'datamind-chat' }
+    {
+      name: 'datamind-chat-v1',
+      storage: createJSONStorage(() => localStorage),
+      partialize: (state) => ({
+        sessions: state.sessions,
+        messages: state.messages,
+        activeSessionId: state.activeSessionId,
+        knowledge: state.knowledge,
+        settings: state.settings,
+        activePersonaId: state.activePersonaId,
+        theme: state.theme,
+        fontSize: state.fontSize,
+        sidebarCollapsed: state.sidebarCollapsed,
+        apiKeys: state.apiKeys,
+      }),
+    }
   )
 )
+
+// ===================== 便捷导出 =====================
+
+export function formatTime(ts: number): string {
+  const now = new Date()
+  const d = new Date(ts)
+  const sameDay = now.toDateString() === d.toDateString()
+  if (sameDay) {
+    return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+  }
+  const diff = now.getTime() - d.getTime()
+  const oneDay = 24 * 60 * 60 * 1000
+  if (diff < oneDay * 7) {
+    return d.toLocaleDateString('zh-CN', { weekday: 'short' }) + ' ' + d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+  }
+  return d.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })
+}

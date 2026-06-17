@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DataMind 开放平台</title>
+  <script>
+    // GitHub Pages SPA fallback
+    // 场景：用户直接访问 https://luck14150.github.io/audiobook-app/#/chat 以外的路径，
+    // 或带查询参数的地址 → GitHub 找不到文件 → 进入 404.html → 本脚本重定向到 #/ 形式
+    (function () {
+      var base = '/audiobook-app/';
+      // 把 /audiobook-app/ 之后的路径、查询、哈希 全部保留，重写为 #/ 的形式
+      var current = window.location.pathname;
+      var query = window.location.search;
+      var hash = window.location.hash;
+      // 如果已经在 base 根路径且带有正确 hash，则不需要处理
+      if (current.replace(/\/$/, '') === base.replace(/\/$/, '') || current === base) {
+        return;
+      }
+      // 提取子路径
+      var subpath = current;
+      if (current.indexOf(base) === 0) {
+        subpath = current.substring(base.length - 1);
+      }
+      // 组合成：/audiobook-app/#/ 后面接 subpath + query + hash
+      var target = base + '#' + subpath + query + hash;
+      // 避免重复跳转
+      if (subpath !== '' && subpath !== '/') {
+        window.location.replace(target);
+      } else {
+        window.location.replace(base);
+      }
+    })();
+  </script>
+</head>
+<body style="font-family:-apple-system,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;background:#f8fafc;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;color:#0f172a;">
+  <div style="text-align:center;max-width:420px;padding:24px;">
+    <div style="font-size:42px;margin-bottom:12px;">🤖</div>
+    <h1 style="font-size:18px;margin:0 0 8px 0;">DataMind 开放平台</h1>
+    <p style="font-size:13px;color:#475569;margin:0;">正在跳转...</p>
+    <p style="font-size:11px;color:#94a3b8;margin-top:16px;">
+      如果 3 秒后仍未跳转，请点击
+      <a href="/audiobook-app/" style="color:#6366f1;font-weight:600;text-decoration:none;">这里</a>
+    </p>
+  </div>
+</body>
+</html>
