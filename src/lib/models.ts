@@ -7,7 +7,7 @@
  * 3. 本地引擎（完全免费，离线可用）
  */
 
-export type ModelProvider = 'openrouter' | 'siliconflow' | 'doubao' | 'deepseek' | 'kimi' | 'glm' | 'qwen' | 'local'
+export type ModelProvider = 'openrouter' | 'siliconflow' | 'doubao' | 'deepseek' | 'kimi' | 'glm' | 'qwen' | 'agnes' | 'local'
 export type ModelCapability = 'chat' | 'code' | 'vision' | 'embedding'
 
 export interface ModelInfo {
@@ -49,6 +49,7 @@ const DS = 'https://api.deepseek.com/v1'            // DeepSeek
 const KM = 'https://api.moonshot.cn/v1'             // 月之暗面 Kimi
 const GL = 'https://open.bigmodel.cn/api/paas/v4'   // 智谱 GLM
 const QW = 'https://dashscope.aliyuncs.com/compatible-mode/v1' // 通义千问
+const AG = 'https://apihub.agnes-ai.com/v1'         // Agnes AI（新加坡，全球 Top10 AI Lab，无限免费）
 
 // ============================================================
 // 模型列表（按 sortOrder 升序）
@@ -620,24 +621,40 @@ export const MODELS: ModelInfo[] = [
   },
 
   // ──────────────────────────────────────────
-  // TRAE（字节 Auto）
+  // 🌟 Agnes AI（新加坡 Sapiens AI，无限免费）
   // ──────────────────────────────────────────
 
   {
-    id: 'trae-auto',
-    name: 'TRAE-Auto（字节官方免费）',
-    provider: 'doubao',
-    modelName: 'auto',
-    baseUrl: DB,
-    description: 'TRAE 内置 Auto 模型，字节跳动全模型套件，2026年6月宣布全量免费开放，永久免费',
-    tags: ['国产', '免费', 'Auto', '全模型'],
+    id: 'agnes-2.0-flash',
+    name: '🌟 Agnes-2.0-Flash（永久免费·无限用）',
+    provider: 'agnes',
+    modelName: 'agnes-2.0-flash',
+    baseUrl: AG,
+    description: '新加坡 Sapiens AI 旗舰模型，全球 Top 10 AI Lab。文本/图像/视频三大模型 API 无限期免费，不绑卡、不充值、无功能阉割，国内直连',
+    tags: ['免费', '无限用', '国产替代', '快速'],
     isFree: true,
-    freeQuota: '永久免费，无总 Token 限制（仅限请求速率限制）',
-    contextWindow: 64000,
+    freeQuota: '无限期免费，无总 Token 限制',
+    contextWindow: 128000,
     capabilities: ['chat', 'code'],
     requiresKey: true,
-    signupUrl: 'https://trae.cn/',
-    sortOrder: 5,
+    signupUrl: 'https://agnes-ai.com/',
+    sortOrder: 3,
+  },
+  {
+    id: 'agnes-image-2.1',
+    name: '🖼️ Agnes-Image-2.1（永久免费·无限用）',
+    provider: 'agnes',
+    modelName: 'agnes-image-2.1-flash',
+    baseUrl: AG,
+    description: 'Agnes AI 文生图模型，支持多种风格，永久免费无限用',
+    tags: ['免费', '无限用', '图像生成'],
+    isFree: true,
+    freeQuota: '无限期免费，无总 Token 限制',
+    contextWindow: 0,
+    capabilities: ['vision'],
+    requiresKey: true,
+    signupUrl: 'https://agnes-ai.com/',
+    sortOrder: 4,
   },
 
   // ──────────────────────────────────────────
@@ -709,6 +726,7 @@ export function getPlatformKeyName(provider: ModelProvider): string {
     kimi: 'api_key_kimi',
     glm: 'api_key_glm',
     qwen: 'api_key_qwen',
+    agnes: 'api_key_agnes',
     local: '',
   }
   return names[provider]

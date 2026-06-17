@@ -10,7 +10,7 @@ import { persist, createJSONStorage } from 'zustand/middleware'
 import type { KnowledgeEntry } from '../lib/shared'
 import type { PersonaProfile } from '../lib/smartAI'
 import { PERSONAS, generateReply, streamReply, getPersonaById } from '../lib/smartAI'
-import { RECOMMENDED_FREE_MODEL, getModelById, type ModelInfo } from '../lib/models'
+import { getModelById, type ModelInfo } from '../lib/models'
 import { chatCompletionStream, type ChatMessage as AChatMessage, type StreamingCallbacks } from '../lib/aiClient'
 
 // ===================== 数据类型 =====================
@@ -127,13 +127,13 @@ function uid(): string { return genId() }
 
 // ===================== Store 定义 =====================
 
-// 默认使用推荐的免费模型（OpenRouter 的 Step-3.5-Flash）
-const DEFAULT_ACTIVE_MODEL_ID = RECOMMENDED_FREE_MODEL?.id ?? 'local-smart'
+// 默认使用 Agnes AI（永久免费·无限用，新加坡 Sapiens AI）
+const DEFAULT_ACTIVE_MODEL_ID = 'agnes-2.0-flash'
 
 const DEFAULT_SETTINGS: ApiSettings = {
-  endpoint: RECOMMENDED_FREE_MODEL?.baseUrl ?? '',
+  endpoint: 'https://apihub.agnes-ai.com/v1',
   apiKey: '',
-  modelName: RECOMMENDED_FREE_MODEL?.modelName ?? '',
+  modelName: 'agnes-2.0-flash',
   temperature: 0.7,
   maxTokens: 2048,
   topP: 0.9,
