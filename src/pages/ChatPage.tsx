@@ -337,13 +337,13 @@ export default function ChatPage(): React.ReactElement {
               </div>
             ) : (
               // 消息列表
-              <div className="space-y-5">
+              <div className="space-y-5 w-full">
                 {sessionMessages.map((m) => {
                   const isUser = m.role === 'user'
                   return (
                     <div
                       key={m.id}
-                      className={`flex gap-2.5 ${isUser ? 'justify-start' : 'justify-end flex-row-reverse'}`}
+                      className={`flex gap-2.5 w-full ${isUser ? 'justify-start' : 'justify-end'}`}
                     >
                       {/* 头像 */}
                       <div
@@ -357,7 +357,7 @@ export default function ChatPage(): React.ReactElement {
                       </div>
 
                       {/* 消息气泡 */}
-                      <div className={`flex flex-col ${isUser ? 'items-start' : 'items-end'} max-w-[80%]`}>
+                      <div className={`flex flex-col max-w-[80%] ${isUser ? 'items-start' : 'items-end'}`}>
                         <div
                           className={`rounded-2xl px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap break-words shadow-sm ${
                             isUser
