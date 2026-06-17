@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { useChatStore } from '../stores'
 import {
   Brain,
@@ -149,6 +149,17 @@ export default function SettingsPage(): React.ReactElement {
   const [showFreeGuide, setShowFreeGuide] = useState<boolean>(false)
 
   const hasApi = useMemo<boolean>(() => Boolean(endpoint.trim() && apiKey.trim()), [endpoint, apiKey])
+
+  // 🚨 页面加载时强制同步 DEFAULT_SETTINGS 到 store
+  // 解决 persist rehydrate 时序问题——确保 Agnes API 配置在 store 层面也生效
+  useEffect(() => {
+    updateSettings({
+      endpoint: DEFAULT_SETTINGS.endpoint,
+      apiKey: DEFAULT_SETTINGS.apiKey,
+      modelName: DEFAULT_SETTINGS.modelName,
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const todayKeyMemo = useMemo<string>(() => {
     const d = new Date()
