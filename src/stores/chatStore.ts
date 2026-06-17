@@ -568,6 +568,7 @@ export const useChatStore = create<ChatStore>()(
         fontSize: state.fontSize,
         sidebarCollapsed: state.sidebarCollapsed,
         apiKeys: state.apiKeys,
+        currentModelId: state.currentModelId,
       }),
     }
   )
