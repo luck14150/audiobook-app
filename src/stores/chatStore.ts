@@ -132,7 +132,7 @@ const DEFAULT_ACTIVE_MODEL_ID = 'agnes-2.0-flash'
 
 const DEFAULT_SETTINGS: ApiSettings = {
   endpoint: 'https://apihub.agnes-ai.com/v1',
-  apiKey: '',
+  apiKey: 'sk-tIQbtS4899pY8zv4mtL7iAf5nBLpD6NY5AWVv8ho4vADZxZb',
   modelName: 'agnes-2.0-flash',
   temperature: 0.7,
   maxTokens: 2048,
