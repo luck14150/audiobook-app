@@ -343,7 +343,7 @@ export default function ChatPage(): React.ReactElement {
                   return (
                     <div
                       key={m.id}
-                      className={`flex gap-2.5 ${isUser ? 'justify-end flex-row-reverse' : ''}`}
+                      className={`flex gap-2.5 ${isUser ? 'justify-start' : 'justify-end flex-row-reverse'}`}
                     >
                       {/* 头像 */}
                       <div
@@ -357,12 +357,12 @@ export default function ChatPage(): React.ReactElement {
                       </div>
 
                       {/* 消息气泡 */}
-                      <div className={`flex flex-col ${isUser ? 'items-end' : 'items-start'} max-w-[80%]`}>
+                      <div className={`flex flex-col ${isUser ? 'items-start' : 'items-end'} max-w-[80%]`}>
                         <div
                           className={`rounded-2xl px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap break-words shadow-sm ${
                             isUser
-                              ? 'bg-gradient-to-r from-indigo-500 to-violet-600 text-white rounded-br-md'
-                              : 'bg-white text-slate-800 border border-slate-200 rounded-bl-md'
+                              ? 'bg-gradient-to-r from-indigo-500 to-violet-600 text-white rounded-bl-md'
+                              : 'bg-white text-slate-800 border border-slate-200 rounded-br-md'
                           }`}
                         >
                           {m.content || (m.streaming ? (
