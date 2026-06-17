@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import ReactDOM from 'react-dom/client'
-import { HashRouter } from 'react-router-dom'
+import { createHashRouter, RouterProvider } from 'react-router-dom'
 import App from './App'
 import { useChatStore } from './stores'
 import './index.css'
@@ -8,7 +8,6 @@ import './index.css'
 function Root() {
   const [ready, setReady] = useState(false)
 
-  // 在应用挂载前触发 store 初始化（同步完成）
   useEffect(() => {
     let mounted = true
     try {
@@ -16,7 +15,6 @@ function Root() {
     } catch {
       // 忽略
     }
-    // 立即显示
     if (mounted) setReady(true)
     return () => {
       mounted = false
@@ -51,13 +49,25 @@ function Root() {
     )
   }
 
-  return <App />
+  const router = createHashRouter(
+    [
+      {
+        path: '/*',
+        element: <App />,
+      },
+    ],
+    {
+      future: {
+        v7_relativeSplatPath: true,
+      },
+    }
+  )
+
+  return <RouterProvider router={router} />
 }
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <HashRouter>
-      <Root />
-    </HashRouter>
+    <Root />
   </React.StrictMode>,
 )
