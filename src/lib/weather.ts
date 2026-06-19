@@ -459,14 +459,7 @@ function jsonpRequest<T = any>(url: string, timeout = 12000): Promise<T> {
   })
 }
 
-/** 高德 API（JSONP） */
-async function amapRequest<T = any>(path: string, params: Record<string, string>): Promise<T> {
-  const allParams = { ...params, key: '89d198e442cee91f8b01e5d69b850eed', output: 'json' }
-  const url = `https://restapi.amap.com${path}?${new URLSearchParams(allParams).toString()}`
-  return jsonpRequest<T>(url, 12000)
-}
-
-// ⭐ 高德天气文本 → 图标（高德 API 返回的 weather 字段是中文文本）
+/** 高德天气文本 → 图标（高德 API 返回的 weather 字段是中文文本） */
 const AMAP_WEATHER_ICONS: Record<string, string> = {
   '晴': '☀️',
   '多云': '⛅',

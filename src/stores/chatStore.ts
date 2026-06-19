@@ -75,6 +75,7 @@ interface ChatStore {
     humidity: number
     windSpeed: number
     windDirection: number
+    weatherCode: number
     weatherText: string
     weatherIcon: string
     isDay: boolean
@@ -92,6 +93,7 @@ interface ChatStore {
     humidity: number
     windSpeed: number
     windDirection: number
+    weatherCode: number
     weatherText: string
     weatherIcon: string
     isDay: boolean
