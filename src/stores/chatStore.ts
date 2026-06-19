@@ -552,11 +552,15 @@ export const useChatStore = create<ChatStore>()(
       },
     }),
     {
-      name: 'datamind-chat-v1',
+      name: 'datamind-chat-v2',
       storage: createJSONStorage(() => localStorage),
-      // version 2: 引入"除非代码修改，否则 API 不变"策略
-      // 任何旧版本数据（version 0 或 1）都将通过 migrate 清除 settings 字段
-      version: 2,
+      // version 3: 彻底确保 settings 永远使用 DEFAULT_SETTINGS
+      // - 换用新的 storage key（datamind-chat-v2），避免旧数据干扰
+      // - migrate 清除所有旧版本中的 settings
+      // - partialize 不写入 settings
+      // - merge 强制 settings = DEFAULT_SETTINGS
+      // - onRehydrateStorage 作为最后防线，rehydrate 后再次强制覆盖
+      version: 3,
       partialize: (state) => ({
         sessions: state.sessions,
         messages: state.messages,
@@ -570,16 +574,14 @@ export const useChatStore = create<ChatStore>()(
         currentModelId: state.currentModelId,
         // ⚠️ settings 不持久化——始终使用代码中 DEFAULT_SETTINGS
       }),
-      // migrate: 旧版本数据强制清除 settings 字段
       migrate: (persistedState, version) => {
-        if (version < 2 && persistedState && typeof persistedState === 'object') {
+        if (version < 3 && persistedState && typeof persistedState === 'object') {
           const { settings, ...clean } = persistedState as Record<string, any>
           void settings
           return clean
         }
         return persistedState
       },
-      // merge: 最终防线——无论持久化数据包含什么，settings 永远用 DEFAULT_SETTINGS
       merge: (persistedState, currentState) => {
         const persisted = persistedState || {}
         const { settings, ...rest } = persisted as Record<string, any>
@@ -589,6 +591,11 @@ export const useChatStore = create<ChatStore>()(
           ...rest,
           settings: DEFAULT_SETTINGS,
         } as ChatStore
+      },
+      onRehydrateStorage: () => (state) => {
+        if (state) {
+          ;(state as any).settings = DEFAULT_SETTINGS
+        }
       },
     }
   )

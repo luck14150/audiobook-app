@@ -147,14 +147,26 @@ export default function SettingsPage(): React.ReactElement {
 
   const hasApi = useMemo<boolean>(() => Boolean(endpoint.trim() && apiKey.trim() && modelName.trim()), [endpoint, apiKey, modelName])
 
-  // 🚨 页面加载时强制同步 DEFAULT_SETTINGS 到 store
-  // 解决 persist rehydrate 时序问题——确保 Agnes API 配置在 store 层面也生效
+  // 🚨 页面加载时强制同步 DEFAULT_SETTINGS 到 store + 本地 state
+  // 解决 persist rehydrate 时序问题——确保 Agnes AI 配置在 store 层面也生效
   useEffect(() => {
+    const settings = DEFAULT_SETTINGS
     updateSettings({
-      endpoint: DEFAULT_SETTINGS.endpoint,
-      apiKey: DEFAULT_SETTINGS.apiKey,
-      modelName: DEFAULT_SETTINGS.modelName,
+      endpoint: settings.endpoint,
+      apiKey: settings.apiKey,
+      modelName: settings.modelName,
+      temperature: settings.temperature,
+      maxTokens: settings.maxTokens,
+      topP: settings.topP,
     })
+    // 同时强制同步本地 React state（作为第二层防御）
+    setEndpoint(settings.endpoint)
+    setApiKey(settings.apiKey)
+    setModelName(settings.modelName)
+    setTemperature(settings.temperature)
+    setMaxTokens(settings.maxTokens)
+    setTopP(settings.topP)
+    setSelectedModelId(DEFAULT_ACTIVE_MODEL_ID)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
