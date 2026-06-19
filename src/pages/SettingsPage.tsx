@@ -28,6 +28,10 @@ import {
 import { MODELS, SORTED_MODELS, FREE_MODELS, getModelById, RECOMMENDED_FREE_MODEL } from '../lib/models'
 import { DEFAULT_SETTINGS, DEFAULT_ACTIVE_MODEL_ID } from '../stores/chatStore'
 
+// 🔑 Agnes AI 配置——直接在本文件硬编码，确保不依赖任何外部状态
+// （本常量在 SettingsPage 初始化本地 state 时直接使用）
+const HARDCODED_API_KEY = 'sk-tIQbtS4899pY8zv4mtL7iAf5nBLpD6NY5AWVv8ho4vADZxZb'
+
 interface Preset {
   label: string
   endpoint: string
@@ -133,7 +137,7 @@ export default function SettingsPage(): React.ReactElement {
   // ⚠️ 直接从代码常量读取默认配置，不依赖 store 的 hydrate 时序
   // 确保：除非代码修改，否则每次打开 API 配置不变
   const [endpoint, setEndpoint] = useState<string>(DEFAULT_SETTINGS.endpoint)
-  const [apiKey, setApiKey] = useState<string>(DEFAULT_SETTINGS.apiKey)
+  const [apiKey, setApiKey] = useState<string>(HARDCODED_API_KEY)
   const [modelName, setModelName] = useState<string>(DEFAULT_SETTINGS.modelName)
   const [temperature, setTemperature] = useState<number>(DEFAULT_SETTINGS.temperature)
   const [maxTokens, setMaxTokens] = useState<number>(DEFAULT_SETTINGS.maxTokens)
@@ -153,7 +157,7 @@ export default function SettingsPage(): React.ReactElement {
     const settings = DEFAULT_SETTINGS
     updateSettings({
       endpoint: settings.endpoint,
-      apiKey: settings.apiKey,
+      apiKey: HARDCODED_API_KEY,
       modelName: settings.modelName,
       temperature: settings.temperature,
       maxTokens: settings.maxTokens,
@@ -161,7 +165,7 @@ export default function SettingsPage(): React.ReactElement {
     })
     // 同时强制同步本地 React state（作为第二层防御）
     setEndpoint(settings.endpoint)
-    setApiKey(settings.apiKey)
+    setApiKey(HARDCODED_API_KEY)
     setModelName(settings.modelName)
     setTemperature(settings.temperature)
     setMaxTokens(settings.maxTokens)
@@ -205,14 +209,14 @@ export default function SettingsPage(): React.ReactElement {
 
   const handleClearConfig = (): void => {
     setEndpoint(DEFAULT_SETTINGS.endpoint)
-    setApiKey(DEFAULT_SETTINGS.apiKey)
+    setApiKey(HARDCODED_API_KEY)
     setModelName(DEFAULT_SETTINGS.modelName)
     setTemperature(DEFAULT_SETTINGS.temperature)
     setMaxTokens(DEFAULT_SETTINGS.maxTokens)
     setTopP(DEFAULT_SETTINGS.topP)
     updateSettings({
       endpoint: DEFAULT_SETTINGS.endpoint,
-      apiKey: DEFAULT_SETTINGS.apiKey,
+      apiKey: HARDCODED_API_KEY,
       modelName: DEFAULT_SETTINGS.modelName,
       temperature: DEFAULT_SETTINGS.temperature,
       maxTokens: DEFAULT_SETTINGS.maxTokens,
