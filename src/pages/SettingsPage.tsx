@@ -157,8 +157,7 @@ export default function SettingsPage(): React.ReactElement {
 
   const hasApi = useMemo<boolean>(() => Boolean(endpoint.trim() && apiKey.trim() && modelName.trim()), [endpoint, apiKey, modelName])
 
-  // 🚨 页面加载时强制同步 DEFAULT_SETTINGS 到 store + 本地 state
-  // 解决 persist rehydrate 时序问题——确保 Agnes AI 配置在 store 层面也生效
+  // 页面加载时同步 DEFAULT_SETTINGS（Agnes-2.0-Flash）到 store + 本地 state
   useEffect(() => {
     const settings = DEFAULT_SETTINGS
     updateSettings({
@@ -755,6 +754,21 @@ export default function SettingsPage(): React.ReactElement {
             <p>本应用完全在浏览器内运行，AI 对话使用<strong className="text-primary">智能本地引擎</strong>或你配置的<strong className="text-primary">真实 API</strong>。</p>
             <p>所有对话与设置都保存在 <code className="font-mono bg-slate-100 px-1 rounded">localStorage</code> 中，刷新页面不会丢失，但更换浏览器/设备需要重新配置。</p>
             <p>支持 12 种角色与多轮上下文对话，可嵌入知识库内容。</p>
+            <div className="mt-4 pt-4 border-t border-dashed border-slate-200 space-y-2">
+              <div className="flex items-start justify-between gap-3">
+                <span className="text-slate-500">部署地址 (BASE_URL)</span>
+                <code className="font-mono text-[11px] bg-slate-100 px-2 py-1 rounded text-slate-700">{import.meta.env.BASE_URL}</code>
+              </div>
+              <div className="flex items-start justify-between gap-3">
+                <span className="text-slate-500">生产访问地址</span>
+                <code className="font-mono text-[11px] bg-slate-100 px-2 py-1 rounded text-slate-700 break-all text-right">https://luck14150.github.io{import.meta.env.BASE_URL}</code>
+              </div>
+              <div className="flex items-start justify-between gap-3">
+                <span className="text-slate-500">完整 URL</span>
+                <code className="font-mono text-[11px] bg-slate-100 px-2 py-1 rounded text-slate-700 break-all text-right">{typeof window !== 'undefined' ? window.location.origin + import.meta.env.BASE_URL : import.meta.env.BASE_URL}</code>
+              </div>
+              <p className="text-[10px] text-slate-400 mt-1">💡 修改 `vite.config.ts` 中的 `base` 字段后，所有内部资源路径将自动同步更新。</p>
+            </div>
           </div>
         </section>
       </div>

@@ -61,8 +61,47 @@ interface ChatStore {
   externalKnowledgeLoaded: boolean
   externalKnowledgeLoading: boolean
   externalKnowledgeError: string | null
+  externalKnowledgeProgress: { loaded: number; total: number; entries: number }
   loadExternalKnowledge: () => Promise<void>
   settings: ApiSettings
+
+  // ⭐ 定位与天气（不持久化，本地缓存有效期内使用）
+  geoStatus: 'idle' | 'requesting' | 'success' | 'denied' | 'unsupported' | 'error'
+  geoError: string | null
+  geoLocation: { lat: number; lon: number; accuracy: number; fetchedAt: number; city?: string; country?: string } | null
+  geoWeather: {
+    temperature: number
+    apparentTemperature: number
+    humidity: number
+    windSpeed: number
+    windDirection: number
+    weatherText: string
+    weatherIcon: string
+    isDay: boolean
+    precipitation: number
+    cloudCover: number
+    city: string
+    country: string
+    fetchedAt: number
+  } | null
+  setGeoStatus: (s: 'idle' | 'requesting' | 'success' | 'denied' | 'unsupported' | 'error') => void
+  setGeoLocation: (loc: { lat: number; lon: number; accuracy: number; fetchedAt: number; city?: string; country?: string } | null) => void
+  setGeoWeather: (w: {
+    temperature: number
+    apparentTemperature: number
+    humidity: number
+    windSpeed: number
+    windDirection: number
+    weatherText: string
+    weatherIcon: string
+    isDay: boolean
+    precipitation: number
+    cloudCover: number
+    city: string
+    country: string
+    fetchedAt: number
+  } | null) => void
+  setGeoError: (e: string | null) => void
 
   // UI 状态（页面需要）
   theme: 'light' | 'dark'
@@ -132,13 +171,13 @@ function uid(): string { return genId() }
 
 // ===================== Store 定义 =====================
 
-// 默认使用 Qwen Plus（通义千问增强版，国内直连速度快）
-export const DEFAULT_ACTIVE_MODEL_ID = 'qw-plus'
+// 默认使用 Agnes-2.0-Flash（新加坡 Sapiens AI，无限免费，已内置 Key，打开即用）
+export const DEFAULT_ACTIVE_MODEL_ID = 'agnes-2.0-flash'
 
 export const DEFAULT_SETTINGS: ApiSettings = {
-  endpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+  endpoint: 'https://apihub.agnes-ai.com/v1',
   apiKey: 'sk-tIQbtS4899pY8zv4mtL7iAf5nBLpD6NY5AWVv8ho4vADZxZb',
-  modelName: 'qwen-plus',
+  modelName: 'agnes-2.0-flash',
   temperature: 0.7,
   maxTokens: 2048,
   topP: 0.9,
@@ -440,22 +479,33 @@ export const useChatStore = create<ChatStore>()(
       externalKnowledgeLoaded: false,
       externalKnowledgeLoading: false,
       externalKnowledgeError: null,
+      externalKnowledgeProgress: { loaded: 0, total: 0, entries: 0 },
       loadExternalKnowledge: async () => {
         const st = get()
         if (st.externalKnowledgeLoading || st.externalKnowledgeLoaded) return
-        set({ externalKnowledgeLoading: true, externalKnowledgeError: null })
+        set({
+          externalKnowledgeLoading: true,
+          externalKnowledgeError: null,
+          externalKnowledgeProgress: { loaded: 0, total: 0, entries: 0 },
+        })
         try {
-          // 保证 GitHub Pages / 开发服务器 / localhost 都可用
-          const origin = window.location.origin
-          const base = origin + '/'
+          // ⭐ 使用 Vite 注入的 BASE_URL（与 vite.config.ts 的 base 字段同步）
+          // 开发: /audiobook-app/；生产部署: https://luck14150.github.io/audiobook-app/
+          const base = import.meta.env.BASE_URL
           const manifest = await fetch(base + 'knowledge/manifest.json').then(r => {
             if (!r.ok) throw new Error('manifest 加载失败: ' + r.status)
             return r.json()
           })
           const files: string[] = manifest.files || []
-          // 每 5 个 chunk 合并一次写入 store，减少 React 重渲染
-          let batch: any[] = []
-          for (let i = 0; i < files.length; i++) {
+          const totalFiles = files.length
+          set({ externalKnowledgeProgress: { loaded: 0, total: totalFiles, entries: 0 } })
+
+          // 每 2 个 chunk 合并一次写入 store（避免频繁 setState 重渲染）
+          // 并且每加载完 1 个 chunk 就用 setTimeout 让出主线程，防止 UI 卡死
+          const BATCH_SIZE = 2
+          let batch: KnowledgeEntry[] = []
+
+          for (let i = 0; i < totalFiles; i++) {
             const chunk = await fetch(base + 'knowledge/' + files[i]).then(r => {
               if (!r.ok) throw new Error(files[i] + ' 加载失败: ' + r.status)
               return r.json()
@@ -475,20 +525,55 @@ export const useChatStore = create<ChatStore>()(
                 }
               }
             }
-            if ((i + 1) % 5 === 0 || i === files.length - 1) {
-              if (batch.length > 0) {
-                set({ knowledge: [...get().knowledge, ...batch] })
-                batch = []
-              }
+
+            // 每 BATCH_SIZE 个 chunk 或最后一个 chunk 时写入 store
+            const shouldFlush = (i + 1) % BATCH_SIZE === 0 || i === totalFiles - 1
+            if (shouldFlush && batch.length > 0) {
+              set((state) => ({
+                knowledge: [...state.knowledge, ...batch],
+                externalKnowledgeProgress: {
+                  loaded: i + 1,
+                  total: totalFiles,
+                  entries: state.knowledge.length + batch.length,
+                },
+              }))
+              batch = []
+            } else {
+              // 只更新进度数字
+              set((state) => ({
+                externalKnowledgeProgress: {
+                  loaded: i + 1,
+                  total: totalFiles,
+                  entries: state.knowledge.length + batch.length,
+                },
+              }))
             }
+
+            // 让出主线程 10ms，确保 UI 不卡
+            await new Promise((resolve) => setTimeout(resolve, 10))
           }
+
           set({ externalKnowledgeLoaded: true, externalKnowledgeLoading: false })
         } catch (err: any) {
           console.warn('[知识库] 加载外部知识失败:', err?.message || err)
-          set({ externalKnowledgeLoading: false, externalKnowledgeError: err?.message || '加载失败' })
+          set({
+            externalKnowledgeLoading: false,
+            externalKnowledgeError: err?.message || '加载失败，请检查网络后重试',
+          })
         }
       },
       settings: DEFAULT_SETTINGS,
+
+      // ⭐ 定位与天气（仅运行时状态，不持久化到 localStorage）
+      geoStatus: 'idle',
+      geoError: null,
+      geoLocation: null,
+      geoWeather: null,
+      setGeoStatus: (s) => set({ geoStatus: s }),
+      setGeoError: (e) => set({ geoError: e }),
+      setGeoLocation: (loc) => set({ geoLocation: loc }),
+      setGeoWeather: (w) => set({ geoWeather: w }),
+
       theme: 'light',
       setTheme: (t) => set({ theme: t }),
       fontSize: 14,
@@ -908,50 +993,44 @@ export const useChatStore = create<ChatStore>()(
     {
       name: 'datamind-chat-v4',
       storage: createJSONStorage(() => localStorage),
-      // version 5: 彻底确保空/缺失的 knowledge 不覆盖默认知识库
-      // - settings：始终使用代码中 DEFAULT_SETTINGS（不持久化、不读取）
-      // - knowledge：持久化中为 [] 或 undefined → 使用 DEFAULT_KNOWLEDGE；有自定义内容 → 保留
-      version: 5,
+      // version 999: 强制清除所有旧存储数据，重新初始化
+      // 解决旧版本 Agnes 配置残留 + knowledge quota 问题
+      version: 999,
       partialize: (state) => ({
         sessions: state.sessions,
         messages: state.messages,
         activeSessionId: state.activeSessionId,
-        knowledge: state.knowledge,
         activePersonaId: state.activePersonaId,
         theme: state.theme,
         fontSize: state.fontSize,
         sidebarCollapsed: state.sidebarCollapsed,
         apiKeys: state.apiKeys,
         currentModelId: state.currentModelId,
+        // ⚠️ 不持久化 knowledge：10万条知识远超大Storage容量，只存内存
       }),
-      migrate: (persistedState, version) => {
-        if (version < 5 && persistedState && typeof persistedState === 'object') {
-          const { settings, ...clean } = persistedState as Record<string, any>
-          void settings
-          return clean
-        }
-        return persistedState
+      migrate: (persistedState, _version) => {
+        // version 999：强制清空所有旧存储，从零开始
+        void _version
+        return undefined as unknown as Record<string, never>
       },
       merge: (persistedState, currentState) => {
         const persisted = persistedState as Record<string, any> | undefined
         const rest: Record<string, any> = {}
-        let persistedKnowledge: any = undefined
         if (persisted && typeof persisted === 'object') {
           for (const key of Object.keys(persisted)) {
             if (key === 'settings') continue
-            if (key === 'knowledge') { persistedKnowledge = persisted.knowledge; continue }
             rest[key] = persisted[key]
           }
         }
-        const hasUserKnowledge = Array.isArray(persistedKnowledge) && persistedKnowledge.length > 0
-        const mergedKnowledge = hasUserKnowledge
-          ? persistedKnowledge
-          : (currentState.knowledge && currentState.knowledge.length > 0 ? currentState.knowledge : DEFAULT_KNOWLEDGE)
+        // knowledge 不从 localStorage 恢复，始终初始化为默认知识
+        // 外部 10 万条由 loadExternalKnowledge() 从 JSON 加载到内存，不落盘
+        // currentModelId 始终用 DEFAULT_ACTIVE_MODEL_ID，避免旧存储中的无效模型
         return {
           ...currentState,
           ...rest,
-          knowledge: mergedKnowledge,
+          knowledge: DEFAULT_KNOWLEDGE,
           settings: DEFAULT_SETTINGS,
+          currentModelId: DEFAULT_ACTIVE_MODEL_ID,
         } as ChatStore
       },
     }

@@ -13,7 +13,14 @@ import {
   Trash2,
   Pin,
   MoreHorizontal,
+  Cloud,
+  MapPin,
+  AlertTriangle,
+  Sun,
+  Wind,
 } from 'lucide-react'
+import { fetchWeather, windDirectionToText, fetchLocationByIP, reverseGeocode, fetchWeatherByAmapCity } from '../lib/weather'
+import { AMAP_KEY } from '../lib/config'
 
 export default function ChatPage(): React.ReactElement {
   const {
@@ -31,7 +38,136 @@ export default function ChatPage(): React.ReactElement {
     aiSettings,
     sidebarCollapsed,
     toggleSidebar,
+    geoStatus,
+    geoError,
+    geoLocation,
+    geoWeather,
+    setGeoStatus,
+    setGeoError,
+    setGeoLocation,
+    setGeoWeather,
   } = useChatStore()
+
+  // ⭐ 定位与天气（Chat 页面独立控制）
+  const [chatGeoLocLoading, setChatGeoLocLoading] = useState<boolean>(false)
+
+  const handleRequestLocation = async () => {
+    if (chatGeoLocLoading) return
+    setChatGeoLocLoading(true)
+    setGeoStatus('requesting')
+    setGeoError(null)
+
+    // ⭐ 策略：GPS 卫星定位优先 → IP 定位兜底
+    const tryGPS = (): Promise<{ lat: number; lon: number; accuracy: number }> =>
+      new Promise((resolve, reject) => {
+        if (typeof navigator === 'undefined' || !('geolocation' in navigator)) {
+          reject(new Error('BROWSER_UNSUPPORTED'))
+          return
+        }
+        navigator.geolocation.getCurrentPosition(
+          (pos) => resolve({ lat: pos.coords.latitude, lon: pos.coords.longitude, accuracy: pos.coords.accuracy }),
+          (err) => reject(err),
+          { enableHighAccuracy: true, timeout: 20000, maximumAge: 60 * 1000 }
+        )
+      })
+
+    const tryIP = async (): Promise<{ city: string }> => {
+      const r = await fetchLocationByIP(AMAP_KEY)
+      return { city: r.city || '未知城市' }
+    }
+
+    try {
+      let cityName: string | null = null
+
+      // 优先：GPS 卫星定位
+      try {
+        const coords = await tryGPS()
+        const g = await reverseGeocode(coords.lat, coords.lon)
+        cityName = g.city
+        setGeoLocation({
+          lat: coords.lat,
+          lon: coords.lon,
+          accuracy: coords.accuracy,
+          fetchedAt: Date.now(),
+          city: g.city,
+          country: g.country,
+        })
+      } catch (gpsErr: any) {
+        if (gpsErr.message === 'BROWSER_UNSUPPORTED') {
+          setGeoStatus('unsupported')
+          setGeoError('当前浏览器不支持定位功能')
+          setChatGeoLocLoading(false)
+          return
+        }
+        if (gpsErr.code === 1) {
+          setGeoStatus('denied')
+          setGeoError('你拒绝了定位授权，请在浏览器地址栏左侧允许定位')
+        } else {
+          setGeoError('GPS 定位不可用，将尝试 IP 定位…')
+        }
+        try {
+          const ipResult = await tryIP()
+          cityName = ipResult.city
+          setGeoLocation({
+            lat: 0,
+            lon: 0,
+            accuracy: 0,
+            fetchedAt: Date.now(),
+            city: ipResult.city,
+            country: '中国',
+          })
+        } catch {
+          setGeoError('定位服务不可用，请手动输入城市')
+          setGeoStatus('error')
+          setChatGeoLocLoading(false)
+          return
+        }
+      }
+
+      if (!cityName) {
+        setGeoError('无法获取位置信息，请手动输入城市')
+        setGeoStatus('error')
+        setChatGeoLocLoading(false)
+        return
+      }
+
+      // ⭐ 用高德天气 API
+      try {
+        const w = await fetchWeatherByAmapCity(cityName, AMAP_KEY)
+        setGeoWeather(w)
+        setGeoStatus('success')
+      } catch {
+        setGeoError('天气服务暂时不可用，请稍后再试')
+        setGeoStatus('error')
+      }
+    } catch (e: any) {
+      setGeoError(e?.message || '定位失败')
+      setGeoStatus('error')
+    } finally {
+      setChatGeoLocLoading(false)
+    }
+  }
+
+  const handleAskWeather = () => {
+    if (!geoWeather) {
+      handleRequestLocation()
+      return
+    }
+    const weatherPrompt =
+      `请分析我当前所在位置的天气情况并给出建议：\n` +
+      `📍 位置：${geoWeather.city}${geoWeather.country ? '（' + geoWeather.country + '）' : ''}\n` +
+      `${geoWeather.weatherIcon} 天气：${geoWeather.weatherText}\n` +
+      `🌡️ 温度：${geoWeather.temperature.toFixed(1)}°C（体感 ${geoWeather.apparentTemperature.toFixed(1)}°C）\n` +
+      `💧 湿度：${geoWeather.humidity}%\n` +
+      `💨 风速：${geoWeather.windSpeed.toFixed(1)} km/h，${windDirectionToText(geoWeather.windDirection)}风\n` +
+      `☁️ 云量：${geoWeather.cloudCover}%${geoWeather.precipitation > 0 ? '，降水 ' + geoWeather.precipitation + ' mm' : ''}\n` +
+      `\n请回答：\n1. 总结当前天气状况\n2. 今天适合做什么？不适合做什么？\n3. 穿衣与出行建议\n4. 未来几小时注意事项`
+    if (!activeSessionId) {
+      const sess = createSession(undefined, '天气咨询')
+      setActiveSessionId(sess.id)
+    }
+    sendMessage(weatherPrompt)
+  }
 
   const [input, setInput] = useState<string>('')
   const [menuOpen, setMenuOpen] = useState<string | null>(null)
@@ -292,6 +428,35 @@ export default function ChatPage(): React.ReactElement {
           </div>
 
           <div className="flex items-center gap-1.5 text-[10px] text-slate-500 flex-shrink-0">
+            {geoWeather ? (
+              <>
+                <Cloud className="w-3.5 h-3.5 text-sky-500" />
+                <span>
+                  {geoWeather.city} · {geoWeather.weatherIcon} {geoWeather.temperature.toFixed(1)}°C
+                </span>
+                <button
+                  onClick={handleAskWeather}
+                  className="ml-1 px-2 py-0.5 bg-sky-100 hover:bg-sky-200 text-sky-700 text-[10px] font-bold rounded-md transition-colors"
+                  title="让 AI 分析当前天气"
+                >
+                  问 AI
+                </button>
+              </>
+            ) : geoStatus === 'requesting' || chatGeoLocLoading ? (
+              <>
+                <div className="w-3 h-3 border-2 border-sky-500 border-t-transparent rounded-full animate-spin" />
+                <span>正在定位…</span>
+              </>
+            ) : (
+              <button
+                onClick={handleRequestLocation}
+                className="flex items-center gap-1 px-2 py-1 bg-sky-50 hover:bg-sky-100 text-sky-700 text-[10px] font-bold rounded-md transition-colors"
+              >
+                <MapPin className="w-3 h-3" />
+                获取位置天气
+              </button>
+            )}
+            <span className="mx-1 text-slate-300">|</span>
             <Sparkles className="w-3.5 h-3.5 text-indigo-500" />
             <span>{sessionMessages.length} 条消息</span>
           </div>
@@ -317,13 +482,23 @@ export default function ChatPage(): React.ReactElement {
                     '解释一下什么是人工智能？',
                     '帮我写一封请假邮件',
                     '推荐 3 本适合初学者的编程书',
-                    '用中文和英文介绍你的能力',
+                    geoWeather
+                      ? `分析${geoWeather.city}的天气并给出出行建议`
+                      : '获取当前位置天气',
                   ].map((q) => (
                     <button
                       key={q}
                       onClick={() => {
-                        setInput(q)
-                        setTimeout(() => handleSend(), 50)
+                        if (q.includes('天气') || q.includes('位置')) {
+                          if (geoWeather) {
+                            handleAskWeather()
+                          } else {
+                            handleRequestLocation()
+                          }
+                        } else {
+                          setInput(q)
+                          setTimeout(() => handleSend(), 50)
+                        }
                       }}
                       className="flex items-start gap-2 p-3 text-left bg-white hover:bg-indigo-50 border border-slate-200 hover:border-indigo-300 rounded-xl text-xs text-slate-700 hover:text-indigo-700 transition-all hover:shadow-md group"
                     >

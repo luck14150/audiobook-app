@@ -70,6 +70,8 @@ export default function KnowledgePage() {
   const deleteKnowledge = useChatStore((state) => state.deleteKnowledge)
   const externalKnowledgeLoaded = useChatStore((s) => s.externalKnowledgeLoaded)
   const externalKnowledgeLoading = useChatStore((s) => s.externalKnowledgeLoading)
+  const externalKnowledgeProgress = useChatStore((s) => s.externalKnowledgeProgress)
+  const externalKnowledgeError = useChatStore((s) => s.externalKnowledgeError)
   const loadExternalKnowledge = useChatStore((s) => s.loadExternalKnowledge)
 
   // 搜索和分类筛选状态
@@ -286,16 +288,58 @@ export default function KnowledgePage() {
           </div>
 
             <div className="flex items-center gap-3">
-              {externalKnowledgeLoading && (
-                <div className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 border border-amber-200 text-amber-700 rounded-xl text-xs font-medium">
-                  <span className="inline-block w-2 h-2 bg-amber-500 rounded-full animate-pulse"></span>
-                  正在加载 {knowledge.length.toLocaleString()} 条知识...
+              {externalKnowledgeLoading && (() => {
+                const { loaded, total, entries } = externalKnowledgeProgress
+                const pct = total > 0 ? Math.round((loaded / total) * 100) : 0
+                return (
+                  <div className="flex items-center gap-3 px-3 py-1.5 bg-amber-50 border border-amber-200 text-amber-700 rounded-xl text-xs font-medium min-w-[220px]">
+                    <div className="relative w-5 h-5 flex-shrink-0">
+                      <div className="absolute inset-0 rounded-full border-2 border-amber-200"></div>
+                      <div
+                        className="absolute inset-0 rounded-full border-2 border-transparent border-t-amber-500 animate-spin"
+                        style={{ animationDuration: '1.2s' }}
+                      ></div>
+                    </div>
+                    <div className="flex flex-col gap-0.5 flex-1">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-amber-700 font-medium">
+                          正在加载 {total > 0 ? `${loaded}/${total}` : '...'}
+                        </span>
+                        <span className="text-amber-600 tabular-nums">{pct}%</span>
+                      </div>
+                      <div className="w-full h-1.5 bg-amber-100 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-gradient-to-r from-amber-400 to-orange-500 rounded-full transition-all duration-300 ease-out"
+                          style={{ width: `${pct}%` }}
+                        ></div>
+                      </div>
+                      <span className="text-[10px] text-amber-600/80">
+                        已加载 {entries.toLocaleString()} 条知识
+                      </span>
+                    </div>
+                  </div>
+                )
+              })()}
+              {externalKnowledgeError && !externalKnowledgeLoading && (
+                <div className="flex items-center gap-1.5 px-3 py-1.5 bg-red-50 border border-red-200 text-red-700 rounded-xl text-xs">
+                  <span>⚠ {externalKnowledgeError}</span>
+                  <button
+                    onClick={() => loadExternalKnowledge()}
+                    className="underline hover:text-red-900 ml-1"
+                  >
+                    重试
+                  </button>
                 </div>
               )}
-              {!externalKnowledgeLoaded && !externalKnowledgeLoading && (
+              {externalKnowledgeLoaded && (
+                <div className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-xl text-xs font-medium">
+                  <span>✓ 10 万条知识已加载</span>
+                </div>
+              )}
+              {!externalKnowledgeLoaded && !externalKnowledgeLoading && !externalKnowledgeError && (
                 <button
                   onClick={() => loadExternalKnowledge()}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white rounded-xl text-xs font-medium shadow-md shadow-amber-500/20 transition-all"
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white rounded-xl text-xs font-medium shadow-md shadow-amber-500/20 transition-all active:scale-95"
                 >
                   <Plus className="w-3.5 h-3.5" /> 加载 10 万条 AI 知识
                 </button>
