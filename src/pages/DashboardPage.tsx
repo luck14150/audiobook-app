@@ -3,7 +3,7 @@ import { useChatStore } from '../stores'
 import { Activity, Key, BarChart2, Zap, MessageSquare, Globe, Code, Shield, CheckCircle2, TrendingUp, Users, Clock, ChevronRight, MapPin, Cloud, Wind, Droplets, Thermometer, RefreshCw, AlertTriangle, X, Sun } from 'lucide-react'
 import { MODELS, type ModelInfo } from '../lib/models'
 import { DEFAULT_ACTIVE_MODEL_ID } from '../stores/chatStore'
-import { fetchWeather, windDirectionToText, fetchLocationByIP, searchCityCoords, reverseGeocode, getPopularCityNames, fetchWeatherByAmapCity, lookupCityCoords, type GeoResult } from '../lib/weather'
+import { fetchWeather, windDirectionToText, fetchClientLocation, getPopularCityNames, fetchWeatherByAmapCity, lookupCityCoords, lookupAdcode, searchCityCoords } from '../lib/weather'
 import { AMAP_KEY } from '../lib/config'
 
 export default function DashboardPage() {
@@ -80,93 +80,23 @@ export default function DashboardPage() {
     setGeoStatus('requesting')
     setGeoError(null)
 
-    // ⭐ 策略：GPS 卫星定位优先 → IP 定位兜底
-    const tryGPS = (): Promise<{ lat: number; lon: number; accuracy: number }> =>
-      new Promise((resolve, reject) => {
-        if (typeof navigator === 'undefined' || !('geolocation' in navigator)) {
-          reject(new Error('BROWSER_UNSUPPORTED'))
-          return
-        }
-        navigator.geolocation.getCurrentPosition(
-          (pos) => resolve({ lat: pos.coords.latitude, lon: pos.coords.longitude, accuracy: pos.coords.accuracy }),
-          (err) => reject(err),
-          { enableHighAccuracy: true, timeout: 20000, maximumAge: 60 * 1000 }
-        )
+    try {
+      // ⭐ 多层 Fallback：GPS → 高德 JSONP → ip-api.com → ipwho.is
+      const geo = await fetchClientLocation()
+      const cityName = geo.city || '未知城市'
+      setGeoLocation({
+        lat: geo.lat,
+        lon: geo.lon,
+        accuracy: 0,
+        fetchedAt: Date.now(),
+        city: geo.city,
+        country: geo.country,
+        adcode: geo.adcode,
       })
 
-    const tryIP = async (): Promise<GeoResult> => {
-      const r = await fetchLocationByIP(AMAP_KEY)
-      return r
-    }
-
-    try {
-      let cityName = null as string | null | undefined
-      let coords: { lat: number; lon: number; accuracy: number } | null = null
-      let useAdcode = null as string | null
-
-      // 优先：GPS 卫星定位
+      // 用 adcode 或城市名查询天气
       try {
-        coords = await tryGPS()
-        // GPS 获取经纬度 → 反向地理编码 → 城市名
-        const g = await reverseGeocode(coords.lat, coords.lon)
-        cityName = g.city
-        // GPS 方式也尝试用城市名查 adcode
-        const cityAdcode = g.city ? lookupCityCoords(g.city)?.adcode : undefined
-        useAdcode = cityAdcode ?? null
-        setGeoLocation({
-          lat: coords.lat,
-          lon: coords.lon,
-          accuracy: coords.accuracy,
-          fetchedAt: Date.now(),
-          city: g.city,
-          country: g.country,
-          adcode: cityAdcode,
-        })
-      } catch (gpsErr: any) {
-        if (gpsErr.message === 'BROWSER_UNSUPPORTED') {
-          setGeoStatus('unsupported')
-          setGeoError('当前浏览器不支持定位功能，请使用「手动」输入城市')
-          setGeoLocLoading(false)
-          return
-        }
-        if (gpsErr.code === 1) {
-          setGeoStatus('denied')
-          setGeoError('你拒绝了定位授权。请在浏览器地址栏左侧允许定位，或点击「手动」输入城市')
-        } else {
-          setGeoError('GPS 定位不可用，将尝试 IP 定位…')
-        }
-        try {
-          const ipResult = await tryIP()
-          cityName = ipResult.city
-          useAdcode = ipResult.adcode ?? null
-          setGeoLocation({
-            lat: ipResult.lat || 0,
-            lon: ipResult.lon || 0,
-            accuracy: 0,
-            fetchedAt: Date.now(),
-            city: ipResult.city,
-            country: '中国',
-            adcode: ipResult.adcode,
-          })
-        } catch {
-          setGeoError('定位服务不可用，请点击「手动」输入城市')
-          setGeoStatus('error')
-          setGeoLocLoading(false)
-          return
-        }
-      }
-
-      if (!cityName) {
-        setGeoError('无法获取位置信息，请手动输入城市')
-        setGeoStatus('error')
-        setGeoLocLoading(false)
-        return
-      }
-
-      // ⭐ 用高德天气 API 查询该城市天气（国内最准）—— 优先使用 adcode
-      try {
-        const queryCity = useAdcode || cityName
-        const w = await fetchWeatherByAmapCity(queryCity, AMAP_KEY)
+        const w = await fetchWeatherByAmapCity(geo.adcode || cityName)
         setGeoWeather(w)
         setGeoStatus('success')
       } catch {
@@ -174,7 +104,7 @@ export default function DashboardPage() {
         setGeoStatus('error')
       }
     } catch (e: any) {
-      setGeoError(e?.message || '定位失败')
+      setGeoError(e?.message || '定位失败，请手动输入城市')
       setGeoStatus('error')
     } finally {
       setGeoLocLoading(false)

@@ -443,73 +443,27 @@ export function lookupCityCoords(cityName: string): GeoResult | null {
 }
 
 // ============================================================
-// ⭐ 高德地图 API 请求
-// 策略：fetch 优先（支持 CORS）→ JSONP 兜底 → 本地城市表保底
+// ⭐ 高德地图 API 请求（JSONP 方式，跨域最可靠）
 // ============================================================
 
-/** fetch 方式请求（支持 CORS） */
-async function fetchRequest<T = any>(url: string, timeout = 10000): Promise<T> {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), timeout)
-  try {
-    const res = await fetch(url, { signal: controller.signal })
-    if (!res.ok) throw new Error('HTTP ' + res.status)
-    const data = await res.json()
-    return data
-  } finally {
-    clearTimeout(timer)
-  }
-}
-
-/** JSONP 请求封装（用于高德 API，fetch 失败时兜底） */
+/** JSONP 请求封装 */
 function jsonpRequest<T = any>(url: string, timeout = 12000): Promise<T> {
   return new Promise((resolve, reject) => {
-    const callbackName = '__amap_cb_' + Date.now() + '_' + Math.random().toString(36).slice(2)
-    const timer = setTimeout(() => {
-      delete (window as any)[callbackName]
-      script && script.remove()
-      reject(new Error('请求超时'))
-    }, timeout)
-    ;(window as any)[callbackName] = (data: T) => {
-      clearTimeout(timer)
-      delete (window as any)[callbackName]
-      script?.remove()
-      resolve(data)
-    }
-    const script = document.createElement('script')
-    script.src = url + (url.includes('?') ? '&' : '?') + 'callback=' + callbackName
-    script.onerror = () => {
-      clearTimeout(timer)
-      delete (window as any)[callbackName]
-      script.remove()
-      reject(new Error('网络请求失败'))
-    }
-    document.head.appendChild(script)
+    const cbName = '__amap_cb_' + Date.now() + '_' + Math.random().toString(36).slice(2)
+    const timer = setTimeout(() => { delete (window as any)[cbName]; s?.remove(); reject(new Error('请求超时')) }, timeout)
+    ;(window as any)[cbName] = (data: T) => { clearTimeout(timer); delete (window as any)[cbName]; s?.remove(); resolve(data) }
+    const s = document.createElement('script')
+    s.src = url + (url.includes('?') ? '&' : '?') + 'callback=' + cbName
+    s.onerror = () => { clearTimeout(timer); delete (window as any)[cbName]; s.remove(); reject(new Error('网络请求失败')) }
+    document.head.appendChild(s)
   })
 }
 
-/** 高德 API 请求 —— fetch 优先，JSONP 兜底 */
+/** 高德 API（JSONP） */
 async function amapRequest<T = any>(path: string, params: Record<string, string>): Promise<T> {
-  // 构造 URL
-  const allParams = { ...params, key: '89d198e442cee91f8b01e5d69b850eed' }
-  const fetchUrl = `https://restapi.amap.com${path}?${new URLSearchParams(allParams).toString()}`
-  // JSONP 版本的 URL：不带 output=json，参数用 & 拼接
-  const jsonpUrl = `https://restapi.amap.com${path}?${new URLSearchParams(allParams).toString()}&callback=__amap_cb__`
-  // 优先用 fetch（高德 API 支持 CORS）
-  try {
-    return await fetchRequest<T>(fetchUrl, 10000)
-  } catch {
-    // fetch 失败，降级到 JSONP
-    return new Promise<T>((resolve, reject) => {
-      const cbName = '__amap_cb_' + Date.now() + '_' + Math.random().toString(36).slice(2)
-      const timer = setTimeout(() => { delete (window as any)[cbName]; s?.remove(); reject(new Error('请求超时')) }, 12000)
-      ;(window as any)[cbName] = (data: T) => { clearTimeout(timer); delete (window as any)[cbName]; s?.remove(); resolve(data) }
-      const s = document.createElement('script')
-      s.src = jsonpUrl.replace('callback=__amap_cb__', 'callback=' + cbName)
-      s.onerror = () => { clearTimeout(timer); delete (window as any)[cbName]; s.remove(); reject(new Error('网络请求失败')) }
-      document.head.appendChild(s)
-    })
-  }
+  const allParams = { ...params, key: '89d198e442cee91f8b01e5d69b850eed', output: 'json' }
+  const url = `https://restapi.amap.com${path}?${new URLSearchParams(allParams).toString()}`
+  return jsonpRequest<T>(url, 12000)
 }
 
 // ⭐ 高德天气文本 → 图标（高德 API 返回的 weather 字段是中文文本）
@@ -584,98 +538,158 @@ function windpowerToSpeed(windpower: string): number {
 
 /**
  * ⭐ 通过高德地图 IP 定位（国内最准，无需用户授权）
- * 策略：fetch 优先 → JSONP 兜底 → 本地城市表保底
+ * 策略：JSONP 方式，跨域最可靠
  */
 export async function fetchLocationByIP(_key?: string): Promise<GeoResult & { ip?: string }> {
-  try {
-    const data = await amapRequest<any>('/v3/ip', {})
-    if (data.status !== '1') throw new Error('高德 IP 定位失败: ' + (data.info || '未知错误'))
+  const data = await amapRequest<any>('/v3/ip', {})
+  if (data.status !== '1') throw new Error('高德 IP 定位失败: ' + (data.info || '未知错误'))
 
-    const city = data.city || '未知城市'
-    const adcode = data.adcode || lookupAdcode(city) || '110000'
-    // rectangle 格式："经度,纬度;经度,纬度"，取中心点
-    let lat = 39.9042, lon = 116.4074
-    if (data.rectangle && typeof data.rectangle === 'string') {
-      const parts = data.rectangle.split(';')
-      if (parts.length >= 2) {
-        const [lon1, lat1] = parts[0].split(',').map(Number)
-        const [lon2, lat2] = parts[1].split(',').map(Number)
-        lon = (lon1 + lon2) / 2
-        lat = (lat1 + lat2) / 2
-      }
-    } else {
-      const coords = lookupCityCoords(city)
-      if (coords) { lat = coords.lat; lon = coords.lon }
+  const city = data.city || '未知城市'
+  const adcode = data.adcode || lookupAdcode(city) || '110000'
+  // rectangle 格式："经度,纬度;经度,纬度"，取中心点
+  let lat = 39.9042, lon = 116.4074
+  if (data.rectangle && typeof data.rectangle === 'string') {
+    const parts = data.rectangle.split(';')
+    if (parts.length >= 2) {
+      const [lon1, lat1] = parts[0].split(',').map(Number)
+      const [lon2, lat2] = parts[1].split(',').map(Number)
+      lon = (lon1 + lon2) / 2
+      lat = (lat1 + lat2) / 2
     }
+  } else {
+    const coords = lookupCityCoords(city)
+    if (coords) { lat = coords.lat; lon = coords.lon }
+  }
 
-    return {
-      lat, lon, city,
-      country: '中国',
-      timeZone: 'Asia/Shanghai',
-      adcode,
-      ip: data.ip || undefined,
-    }
-  } catch (e: any) {
-    throw new Error('IP 定位服务不可用: ' + (e.message || '未知错误'))
+  return {
+    lat, lon, city,
+    country: '中国',
+    timeZone: 'Asia/Shanghai',
+    adcode,
+    ip: data.ip || undefined,
   }
 }
 
 /**
+ * ⭐ 获取当前客户端 IP 和地理位置（多层 Fallback）
+ * 优先级：browser GPS → 高德 JSONP → ip-api.com → 内置表
+ */
+export async function fetchClientLocation(): Promise<GeoResult & { ip?: string }> {
+  // 方法 1: 浏览器 GPS（如有精确位置且在中国附近，优先使用）
+  if (typeof navigator !== 'undefined' && navigator.geolocation) {
+    try {
+      const pos = await new Promise<GeolocationPosition>((resolve, reject) =>
+        navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 8000, maximumAge: 300000 })
+      )
+      const lat = pos.coords.latitude
+      const lon = pos.coords.longitude
+      // GPS 在中国范围内才使用
+      if (lat >= 15 && lat <= 60 && lon >= 70 && lon <= 140) {
+        const geo = await reverseGeocode(lat, lon)
+        const adcode = lookupAdcode(geo.city) ?? undefined
+        return { lat, lon, city: geo.city, country: geo.country, timeZone: geo.timeZone, adcode }
+      }
+    } catch { /* GPS 失败或不在中国，继续下一个方法 */ }
+  }
+
+  // 方法 2: 高德 IP 定位（JSONP，最可靠国内服务）
+  try {
+    return await fetchLocationByIP()
+  } catch { /* 高德失败 */ }
+
+  // 方法 3: ip-api.com（免费，每分钟限制 45 次，使用 JSONP 方式）
+  try {
+    const data = await jsonpRequest<any>('https://ip-api.com/json/?fields=status,country,city,lat,lon,query')
+    if (data.status === 'success') {
+      const city = data.city || '未知城市'
+      const adcode = lookupAdcode(city) ?? undefined
+      return {
+        lat: data.lat,
+        lon: data.lon,
+        city,
+        country: data.country || '未知',
+        timeZone: 'auto',
+        adcode,
+        ip: data.query || undefined,
+      }
+    }
+  } catch { /* ip-api 失败 */ }
+
+  // 方法 4: ipwho.is（备用免费服务）
+  try {
+    const res = await fetch('https://ipwho.is/?fields=status,country,city,latitude,longitude,ip')
+    if (res.ok) {
+      const data = await res.json()
+      if (data.success !== false) {
+        const city = data.city || '未知城市'
+        const adcode = lookupAdcode(city) ?? undefined
+        return {
+          lat: data.latitude,
+          lon: data.longitude,
+          city,
+          country: data.country || '未知',
+          timeZone: data.timezone || 'auto',
+          adcode,
+          ip: data.ip || undefined,
+        }
+      }
+    }
+  } catch { /* ipwho.is 失败 */ }
+
+  throw new Error('无法获取位置信息，请手动输入城市')
+}
+
+/**
  * ⭐ 通过高德地图天气 API 获取天气（国内最权威）
- * 策略：fetch 优先 → JSONP 兜底
  * city 参数优先使用 adcode（数字编码），确保查询准确
  */
 export async function fetchWeatherByAmapCity(cityName: string, _key?: string): Promise<WeatherResult> {
-  try {
-    // 优先使用 adcode 查询，其次回退到中文城市名
-    const adcode = lookupAdcode(cityName) || cityName
-    const data = await amapRequest<any>('/v3/weather/weatherInfo', { city: adcode, extensions: 'base' })
-    if (data.status !== '1') throw new Error('高德天气失败: ' + (data.info || '未知错误'))
+  // 优先使用 adcode 查询，其次回退到中文城市名
+  const adcode = lookupAdcode(cityName) || cityName
+  const data = await amapRequest<any>('/v3/weather/weatherInfo', { city: adcode, extensions: 'base' })
+  if (data.status !== '1') throw new Error('高德天气失败: ' + (data.info || '未知错误'))
 
-    const lives = data.lives
-    if (!lives || lives.length === 0) throw new Error('未找到天气数据')
+  const lives = data.lives
+  if (!lives || lives.length === 0) throw new Error('未找到天气数据')
 
-    const live = lives[0]
-    // 高德 API 返回的 weather 是中文文本（如 "晴"、"小雨"）
-    const weatherText = live.weather || '未知'
-    const { text, icon } = amapWeatherIcon(weatherText)
+  const live = lives[0]
+  // 高德 API 返回的 weather 是中文文本（如 "晴"、"小雨"）
+  const weatherText = live.weather || '未知'
+  const { text, icon } = amapWeatherIcon(weatherText)
 
-    const temp = parseFloat(live.temperature) || 0
-    const humi = parseFloat(live.humidity) || 0
-    const windSpeed = windpowerToSpeed(live.windpower || '')
+  const temp = parseFloat(live.temperature) || 0
+  const humi = parseFloat(live.humidity) || 0
+  const windSpeed = windpowerToSpeed(live.windpower || '')
 
-    // 风向文本 → 角度（近似）
-    const windDirMap: Record<string, number> = {
-      '北': 0, '东北': 45, '东': 90, '东南': 135,
-      '南': 180, '西南': 225, '西': 270, '西北': 315,
-      '北风': 0, '东北风': 45, '东风': 90, '东南风': 135,
-      '南风': 180, '西南风': 225, '西风': 270, '西北风': 315,
-      '无持续风向': 0, '旋转风': 0,
-    }
-    const windDir = windDirMap[live.winddirection] ?? 0
+  // 风向文本 → 角度（近似）
+  const windDirMap: Record<string, number> = {
+    '北': 0, '东北': 45, '东': 90, '东南': 135,
+    '南': 180, '西南': 225, '西': 270, '西北': 315,
+    '北风': 0, '东北风': 45, '东风': 90, '东南风': 135,
+    '南风': 180, '西南风': 225, '西风': 270, '西北风': 315,
+    '无持续风向': 0, '旋转风': 0,
+  }
+  const windDir = windDirMap[live.winddirection] ?? 0
 
-    // 白天/夜晚判断
-    const hour = new Date().getHours()
-    const isDay = hour >= 6 && hour < 18
+  // 白天/夜晚判断
+  const hour = new Date().getHours()
+  const isDay = hour >= 6 && hour < 18
 
-    return {
-      temperature: temp,
-      apparentTemperature: temp,
-      humidity: humi,
-      windSpeed,
-      windDirection: windDir,
-      weatherCode: 0,
-      weatherText: text,
-      weatherIcon: icon,
-      isDay,
-      precipitation: 0,
-      cloudCover: 0,
-      city: live.city || cityName,
-      country: '中国',
-      fetchedAt: Date.now(),
-    }
-  } catch (e: any) {
-    throw new Error('天气服务不可用: ' + (e.message || '未知错误'))
+  return {
+    temperature: temp,
+    apparentTemperature: temp,
+    humidity: humi,
+    windSpeed,
+    windDirection: windDir,
+    weatherCode: 0,
+    weatherText: text,
+    weatherIcon: icon,
+    isDay,
+    precipitation: 0,
+    cloudCover: 0,
+    city: live.city || cityName,
+    country: '中国',
+    fetchedAt: Date.now(),
   }
 }
 

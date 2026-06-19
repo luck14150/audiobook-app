@@ -19,7 +19,7 @@ import {
   Sun,
   Wind,
 } from 'lucide-react'
-import { fetchWeather, windDirectionToText, fetchLocationByIP, reverseGeocode, fetchWeatherByAmapCity, lookupCityCoords, type GeoResult } from '../lib/weather'
+import { fetchWeather, windDirectionToText, fetchClientLocation, fetchWeatherByAmapCity } from '../lib/weather'
 import { AMAP_KEY } from '../lib/config'
 
 export default function ChatPage(): React.ReactElement {
@@ -57,89 +57,23 @@ export default function ChatPage(): React.ReactElement {
     setGeoStatus('requesting')
     setGeoError(null)
 
-    // ⭐ 策略：GPS 卫星定位优先 → IP 定位兜底
-    const tryGPS = (): Promise<{ lat: number; lon: number; accuracy: number }> =>
-      new Promise((resolve, reject) => {
-        if (typeof navigator === 'undefined' || !('geolocation' in navigator)) {
-          reject(new Error('BROWSER_UNSUPPORTED'))
-          return
-        }
-        navigator.geolocation.getCurrentPosition(
-          (pos) => resolve({ lat: pos.coords.latitude, lon: pos.coords.longitude, accuracy: pos.coords.accuracy }),
-          (err) => reject(err),
-          { enableHighAccuracy: true, timeout: 20000, maximumAge: 60 * 1000 }
-        )
+    try {
+      // ⭐ 多层 Fallback：GPS → 高德 JSONP → ip-api.com → ipwho.is
+      const geo = await fetchClientLocation()
+      const cityName = geo.city || '未知城市'
+      setGeoLocation({
+        lat: geo.lat,
+        lon: geo.lon,
+        accuracy: 0,
+        fetchedAt: Date.now(),
+        city: geo.city,
+        country: geo.country,
+        adcode: geo.adcode,
       })
 
-    const tryIP = async (): Promise<GeoResult> => {
-      const r = await fetchLocationByIP(AMAP_KEY)
-      return r
-    }
-
-    try {
-      let cityName = null as string | null | undefined
-      let useAdcode = null as string | null
-
-      // 优先：GPS 卫星定位
+      // 用 adcode 或城市名查询天气
       try {
-        const coords = await tryGPS()
-        const g = await reverseGeocode(coords.lat, coords.lon)
-        cityName = g.city
-        const cityAdcode = lookupCityCoords(g.city)?.adcode
-        useAdcode = cityAdcode || null
-        setGeoLocation({
-          lat: coords.lat,
-          lon: coords.lon,
-          accuracy: coords.accuracy,
-          fetchedAt: Date.now(),
-          city: g.city,
-          country: g.country,
-          adcode: cityAdcode,
-        })
-      } catch (gpsErr: any) {
-        if (gpsErr.message === 'BROWSER_UNSUPPORTED') {
-          setGeoStatus('unsupported')
-          setGeoError('当前浏览器不支持定位功能')
-          setChatGeoLocLoading(false)
-          return
-        }
-        if (gpsErr.code === 1) {
-          setGeoStatus('denied')
-          setGeoError('你拒绝了定位授权，请在浏览器地址栏左侧允许定位')
-        } else {
-          setGeoError('GPS 定位不可用，将尝试 IP 定位…')
-        }
-        try {
-          const ipResult = await tryIP()
-          cityName = ipResult.city
-          useAdcode = ipResult.adcode ?? null
-          setGeoLocation({
-            lat: ipResult.lat || 0,
-            lon: ipResult.lon || 0,
-            accuracy: 0,
-            fetchedAt: Date.now(),
-            city: ipResult.city,
-            country: '中国',
-            adcode: ipResult.adcode,
-          })
-        } catch {
-          setGeoError('定位服务不可用，请手动输入城市')
-          setGeoStatus('error')
-          setChatGeoLocLoading(false)
-          return
-        }
-      }
-
-      if (!cityName) {
-        setGeoError('无法获取位置信息，请手动输入城市')
-        setGeoStatus('error')
-        setChatGeoLocLoading(false)
-        return
-      }
-
-      // ⭐ 用高德天气 API —— 优先使用 IP 定位返回的 adcode
-      try {
-        const w = await fetchWeatherByAmapCity(useAdcode || cityName, AMAP_KEY)
+        const w = await fetchWeatherByAmapCity(geo.adcode || cityName)
         setGeoWeather(w)
         setGeoStatus('success')
       } catch {
@@ -147,7 +81,7 @@ export default function ChatPage(): React.ReactElement {
         setGeoStatus('error')
       }
     } catch (e: any) {
-      setGeoError(e?.message || '定位失败')
+      setGeoError(e?.message || '定位失败，请手动输入城市')
       setGeoStatus('error')
     } finally {
       setChatGeoLocLoading(false)
