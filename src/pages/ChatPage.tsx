@@ -19,7 +19,7 @@ import {
   Sun,
   Wind,
 } from 'lucide-react'
-import { fetchWeather, windDirectionToText, fetchLocationByIP, reverseGeocode, fetchWeatherByAmapCity } from '../lib/weather'
+import { fetchWeather, windDirectionToText, fetchLocationByIP, reverseGeocode, fetchWeatherByAmapCity, lookupCityCoords, type GeoResult } from '../lib/weather'
 import { AMAP_KEY } from '../lib/config'
 
 export default function ChatPage(): React.ReactElement {
@@ -71,19 +71,22 @@ export default function ChatPage(): React.ReactElement {
         )
       })
 
-    const tryIP = async (): Promise<{ city: string }> => {
+    const tryIP = async (): Promise<GeoResult> => {
       const r = await fetchLocationByIP(AMAP_KEY)
-      return { city: r.city || '未知城市' }
+      return r
     }
 
     try {
-      let cityName: string | null = null
+      let cityName = null as string | null | undefined
+      let useAdcode = null as string | null
 
       // 优先：GPS 卫星定位
       try {
         const coords = await tryGPS()
         const g = await reverseGeocode(coords.lat, coords.lon)
         cityName = g.city
+        const cityAdcode = lookupCityCoords(g.city)?.adcode
+        useAdcode = cityAdcode || null
         setGeoLocation({
           lat: coords.lat,
           lon: coords.lon,
@@ -91,6 +94,7 @@ export default function ChatPage(): React.ReactElement {
           fetchedAt: Date.now(),
           city: g.city,
           country: g.country,
+          adcode: cityAdcode,
         })
       } catch (gpsErr: any) {
         if (gpsErr.message === 'BROWSER_UNSUPPORTED') {
@@ -108,13 +112,15 @@ export default function ChatPage(): React.ReactElement {
         try {
           const ipResult = await tryIP()
           cityName = ipResult.city
+          useAdcode = ipResult.adcode ?? null
           setGeoLocation({
-            lat: 0,
-            lon: 0,
+            lat: ipResult.lat || 0,
+            lon: ipResult.lon || 0,
             accuracy: 0,
             fetchedAt: Date.now(),
             city: ipResult.city,
             country: '中国',
+            adcode: ipResult.adcode,
           })
         } catch {
           setGeoError('定位服务不可用，请手动输入城市')
@@ -131,9 +137,9 @@ export default function ChatPage(): React.ReactElement {
         return
       }
 
-      // ⭐ 用高德天气 API
+      // ⭐ 用高德天气 API —— 优先使用 IP 定位返回的 adcode
       try {
-        const w = await fetchWeatherByAmapCity(cityName, AMAP_KEY)
+        const w = await fetchWeatherByAmapCity(useAdcode || cityName, AMAP_KEY)
         setGeoWeather(w)
         setGeoStatus('success')
       } catch {

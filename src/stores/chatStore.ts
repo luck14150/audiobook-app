@@ -68,7 +68,7 @@ interface ChatStore {
   // ⭐ 定位与天气（不持久化，本地缓存有效期内使用）
   geoStatus: 'idle' | 'requesting' | 'success' | 'denied' | 'unsupported' | 'error'
   geoError: string | null
-  geoLocation: { lat: number; lon: number; accuracy: number; fetchedAt: number; city?: string; country?: string } | null
+  geoLocation: { lat: number; lon: number; accuracy: number; fetchedAt: number; city?: string; country?: string; adcode?: string } | null
   geoWeather: {
     temperature: number
     apparentTemperature: number
@@ -85,7 +85,7 @@ interface ChatStore {
     fetchedAt: number
   } | null
   setGeoStatus: (s: 'idle' | 'requesting' | 'success' | 'denied' | 'unsupported' | 'error') => void
-  setGeoLocation: (loc: { lat: number; lon: number; accuracy: number; fetchedAt: number; city?: string; country?: string } | null) => void
+  setGeoLocation: (loc: { lat: number; lon: number; accuracy: number; fetchedAt: number; city?: string; country?: string; adcode?: string } | null) => void
   setGeoWeather: (w: {
     temperature: number
     apparentTemperature: number
