@@ -3,7 +3,7 @@ import { useChatStore } from '../stores'
 import { Activity, Key, BarChart2, Zap, MessageSquare, Globe, Code, Shield, CheckCircle2, TrendingUp, Users, Clock, ChevronRight, MapPin, Cloud, Wind, Droplets, Thermometer, RefreshCw, AlertTriangle, X, Sun } from 'lucide-react'
 import { MODELS, type ModelInfo } from '../lib/models'
 import { DEFAULT_ACTIVE_MODEL_ID } from '../stores/chatStore'
-import { fetchClientLocation, getPopularCityNames, fetchWeatherByAmap, fetchWeatherByAmapCity, lookupAdcode, type AmapWeatherResult } from '../lib/weather'
+import { fetchClientLocation, getCitiesByAlphabet, fetchWeatherByAmap, fetchWeatherByAmapCity, lookupAdcode, type AmapWeatherResult } from '../lib/weather'
 import { AMAP_KEY } from '../lib/config'
 
 export default function DashboardPage() {
@@ -18,7 +18,7 @@ export default function DashboardPage() {
   const [manualCity, setManualCity] = useState<string>('')
   const [showManualInput, setShowManualInput] = useState<boolean>(false)
   const [manualLoading, setManualLoading] = useState<boolean>(false)
-  const popularCities = getPopularCityNames()
+  const cityGroups = getCitiesByAlphabet()
 
   // ⭐ 新的完整天气结果（含4日预报）
   const [amapWeather, setAmapWeather] = useState<AmapWeatherResult | null>(null)
@@ -224,21 +224,30 @@ export default function DashboardPage() {
             </div>
           )}
 
-          {/* ⭐ 热门城市快捷按钮 */}
+          {/* ⭐ 城市按 A-Z 字母分组 */}
           <div className="mb-3">
             <div className="text-[11px] text-muted mb-2 flex items-center gap-1">
-              <Globe className="w-3 h-3" /> 热门城市 · 点击直接查询
+              <Globe className="w-3 h-3" /> 选择城市 · 按字母分组
             </div>
-            <div className="flex flex-wrap gap-1.5">
-              {popularCities.map((city) => (
-                <button
-                  key={city}
-                  onClick={() => fetchWeatherByCity(city)}
-                  disabled={geoLocLoading || manualLoading}
-                  className="px-3 py-1.5 bg-sky-50 hover:bg-sky-100 border border-sky-200 rounded-lg text-[11px] text-sky-700 font-medium transition disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {city}
-                </button>
+            <div className="space-y-2">
+              {cityGroups.map(({ letter, cities }) => (
+                <div key={letter} className="flex items-start gap-2">
+                  <div className="flex-shrink-0 w-6 h-6 rounded-md bg-gradient-to-br from-sky-500 to-indigo-500 text-white text-[11px] font-bold flex items-center justify-center shadow-sm">
+                    {letter}
+                  </div>
+                  <div className="flex flex-wrap gap-1.5 flex-1">
+                    {cities.map((city) => (
+                      <button
+                        key={city}
+                        onClick={() => fetchWeatherByCity(city)}
+                        disabled={geoLocLoading || manualLoading}
+                        className="px-2.5 py-1 bg-sky-50 hover:bg-sky-100 border border-sky-200 rounded-md text-[11px] text-sky-700 font-medium transition disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {city}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               ))}
             </div>
           </div>

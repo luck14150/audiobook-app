@@ -812,3 +812,62 @@ export function getPopularCityNames(): string[] {
     '旧金山', '悉尼', '墨尔本', '多伦多', '温哥华', '迪拜', '莫斯科',
   ]
 }
+
+/** 城市 → 英文首字母（用于 A-Z 分组显示） */
+const CITY_INITIALS: Record<string, string> = {
+  // A
+  '澳门': 'A',
+  // B
+  '北京': 'B',
+  // C
+  '成都': 'C', '重庆': 'C', '长沙': 'C',
+  // D
+  '大连': 'D', '迪拜': 'D',
+  // F
+  '福州': 'F', '旧金山': 'F',
+  // G
+  '广州': 'G',
+  // H
+  '杭州': 'H', '哈尔滨': 'H', '合肥': 'H', '海口': 'H', '香港': 'H',
+  // J
+  '济南': 'J',
+  // K
+  '昆明': 'K',
+  // L
+  '洛杉矶': 'L', '伦敦': 'L',
+  // M
+  '墨尔本': 'M', '莫斯科': 'M',
+  // N
+  '南京': 'N', '南宁': 'N', '纽约': 'N',
+  // P
+  '巴黎': 'P',
+  // Q
+  '青岛': 'Q',
+  // S
+  '上海': 'S', '深圳': 'S', '苏州': 'S', '三亚': 'S', '首尔': 'S', '新加坡': 'S', '悉尼': 'S',
+  // T
+  '天津': 'T', '台北': 'T', '东京': 'T', '多伦多': 'T',
+  // W
+  '武汉': 'W',
+  // X
+  '西安': 'X', '厦门': 'X',
+  // Y
+  // Z
+  '郑州': 'Z',
+  '温哥华': 'V',
+  '曼谷': 'M',
+}
+
+/** 按首字母 A-Z 分组，返回分组后的城市列表（用于 UI 展示） */
+export function getCitiesByAlphabet(): { letter: string; cities: string[] }[] {
+  const groups: Record<string, string[]> = {}
+  const allCities = getPopularCityNames()
+  for (const city of allCities) {
+    const initial = (CITY_INITIALS[city] || city.charAt(0).toUpperCase()).substring(0, 1)
+    if (!groups[initial]) groups[initial] = []
+    groups[initial].push(city)
+  }
+  return Object.keys(groups)
+    .sort()
+    .map((letter) => ({ letter, cities: groups[letter] }))
+}
