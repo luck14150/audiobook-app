@@ -3,7 +3,7 @@ import { useChatStore } from '../stores'
 import { Activity, Key, BarChart2, Zap, MessageSquare, Globe, Code, Shield, CheckCircle2, TrendingUp, Users, Clock, ChevronRight, MapPin, Cloud, Wind, Droplets, Thermometer, RefreshCw, AlertTriangle, X, Sun } from 'lucide-react'
 import { MODELS, type ModelInfo } from '../lib/models'
 import { DEFAULT_ACTIVE_MODEL_ID } from '../stores/chatStore'
-import { fetchWeather, windDirectionToText, fetchClientLocation, getPopularCityNames, fetchWeatherByAmapCity, lookupCityCoords, lookupAdcode, searchCityCoords } from '../lib/weather'
+import { fetchClientLocation, getPopularCityNames, fetchWeatherByAmap, fetchWeatherByAmapCity, lookupAdcode, type AmapWeatherResult } from '../lib/weather'
 import { AMAP_KEY } from '../lib/config'
 
 export default function DashboardPage() {
@@ -20,50 +20,30 @@ export default function DashboardPage() {
   const [manualLoading, setManualLoading] = useState<boolean>(false)
   const popularCities = getPopularCityNames()
 
-  // ⭐ 根据城市名查询天气（高德 API 优先，Open-Meteo 兜底）
+  // ⭐ 新的完整天气结果（含4日预报）
+  const [amapWeather, setAmapWeather] = useState<AmapWeatherResult | null>(null)
+
+  // ⭐ 根据城市名查询天气（高德 API 优先）
   const fetchWeatherByCity = async (cityName: string) => {
     if (manualLoading || geoLocLoading) return
     setManualLoading(true)
     setGeoStatus('requesting')
     setGeoError(null)
     try {
-      // ⭐ 优先用高德天气 API（国内最准）
-      try {
-        const w = await fetchWeatherByAmapCity(cityName, AMAP_KEY)
-        const loc = {
-          lat: 0, lon: 0, accuracy: 0,
-          fetchedAt: Date.now(),
-          city: w.city, country: w.country,
-        }
-        setGeoLocation(loc)
-        setGeoWeather(w)
-        setGeoStatus('success')
-        setShowManualInput(false)
-        setManualLoading(false)
-        return
-      } catch {
-        // 高德失败，兜底用 Open-Meteo
-      }
-
-      // 兜底：内置城市表 + Open-Meteo（全球城市）
-      const result = await searchCityCoords(cityName)
-      if (!result) {
-        setGeoError('未找到城市 "' + cityName + '"，请检查拼写后重试')
-        setGeoStatus('error')
-        setManualLoading(false)
-        return
-      }
-      const loc = {
-        lat: result.lat,
-        lon: result.lon,
-        accuracy: 0,
-        fetchedAt: Date.now(),
-        city: result.city,
-        country: result.country,
-      }
-      setGeoLocation(loc)
-      const w = await fetchWeather(loc.lat, loc.lon)
-      setGeoWeather(w)
+      const adcode = lookupAdcode(cityName) || cityName
+      const w = await fetchWeatherByAmap(adcode)
+      setAmapWeather(w)
+      setGeoLocation({
+        lat: 0, lon: 0, accuracy: 0, fetchedAt: Date.now(),
+        city: w.city, country: '中国', adcode: w.city && lookupAdcode(w.city) || undefined,
+      })
+      setGeoWeather({
+        temperature: w.temperature, apparentTemperature: w.temperature,
+        humidity: w.humidity, windSpeed: 0, windDirection: 0,
+        weatherCode: 0, weatherText: w.weatherText, weatherIcon: w.weatherIcon,
+        isDay: true, precipitation: 0, cloudCover: 0,
+        city: w.city, country: '中国', fetchedAt: w.fetchedAt,
+      })
       setGeoStatus('success')
       setShowManualInput(false)
     } catch (e: any) {
@@ -79,25 +59,25 @@ export default function DashboardPage() {
     setGeoLocLoading(true)
     setGeoStatus('requesting')
     setGeoError(null)
-
     try {
-      // ⭐ 多层 Fallback：GPS → 高德 JSONP → ip-api.com → ipwho.is
+      // ⭐ 多层 Fallback：GPS → 高德 IP → ipapi.co
       const geo = await fetchClientLocation()
       const cityName = geo.city || '未知城市'
       setGeoLocation({
-        lat: geo.lat,
-        lon: geo.lon,
-        accuracy: 0,
-        fetchedAt: Date.now(),
-        city: geo.city,
-        country: geo.country,
-        adcode: geo.adcode,
+        lat: geo.lat, lon: geo.lon, accuracy: 0, fetchedAt: Date.now(),
+        city: geo.city, country: geo.country, adcode: geo.adcode,
       })
-
-      // 用 adcode 或城市名查询天气
+      // 优先用 adcode 查天气，否则用城市名 fallback
       try {
-        const w = await fetchWeatherByAmapCity(geo.adcode || cityName)
-        setGeoWeather(w)
+        const w = await fetchWeatherByAmap(geo.adcode || cityName)
+        setAmapWeather(w)
+        setGeoWeather({
+          temperature: w.temperature, apparentTemperature: w.temperature,
+          humidity: w.humidity, windSpeed: 0, windDirection: 0,
+          weatherCode: 0, weatherText: w.weatherText, weatherIcon: w.weatherIcon,
+          isDay: true, precipitation: 0, cloudCover: 0,
+          city: w.city, country: '中国', fetchedAt: w.fetchedAt,
+        })
         setGeoStatus('success')
       } catch {
         setGeoError('天气服务暂时不可用，请稍后再试')
@@ -244,7 +224,7 @@ export default function DashboardPage() {
             </div>
           )}
 
-          {/* ⭐ 热门城市快捷按钮 —— 最可靠的方式，一键查询天气 */}
+          {/* ⭐ 热门城市快捷按钮 */}
           <div className="mb-3">
             <div className="text-[11px] text-muted mb-2 flex items-center gap-1">
               <Globe className="w-3 h-3" /> 热门城市 · 点击直接查询
@@ -292,45 +272,79 @@ export default function DashboardPage() {
               </button>
             </div>
           )}
-          {(geoStatus === 'requesting' || geoLocLoading) && !geoWeather && (
+          {(geoStatus === 'requesting' || geoLocLoading) && !amapWeather && !geoWeather && (
             <div className="flex items-center justify-center gap-2 p-6 text-sm text-muted">
               <div className="w-4 h-4 border-2 border-sky-500 border-t-transparent rounded-full animate-spin" />
               正在获取位置与天气信息，请稍候…
             </div>
           )}
-          {geoWeather && (
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <div className="bg-gradient-to-br from-sky-50 to-cyan-50 rounded-xl p-3 border border-sky-100">
-                <div className="text-[28px] leading-none mb-2">{geoWeather.weatherIcon}</div>
-                <div className="text-2xl font-bold text-sky-700">{geoWeather.temperature.toFixed(1)}°C</div>
-                <div className="text-[11px] text-slate-500">{geoWeather.weatherText}</div>
-              </div>
-              <div className="bg-gradient-to-br from-orange-50 to-amber-50 rounded-xl p-3 border border-orange-100">
-                <Thermometer className="w-4 h-4 text-orange-500 mb-2" />
-                <div className="text-lg font-bold text-orange-700">体感 {geoWeather.apparentTemperature.toFixed(1)}°C</div>
-                <div className="text-[11px] text-slate-500">湿度 {geoWeather.humidity}%</div>
-              </div>
-              <div className="bg-gradient-to-br from-emerald-50 to-teal-50 rounded-xl p-3 border border-emerald-100">
-                <Wind className="w-4 h-4 text-emerald-500 mb-2" />
-                <div className="text-lg font-bold text-emerald-700">{geoWeather.windSpeed.toFixed(1)} km/h</div>
-                <div className="text-[11px] text-slate-500">{windDirectionToText(geoWeather.windDirection)}风</div>
-              </div>
-              <div className="bg-gradient-to-br from-indigo-50 to-violet-50 rounded-xl p-3 border border-indigo-100">
-                <Droplets className="w-4 h-4 text-indigo-500 mb-2" />
-                <div className="text-lg font-bold text-indigo-700">云量 {geoWeather.cloudCover}%</div>
-                <div className="text-[11px] text-slate-500">
-                  {geoWeather.precipitation > 0 ? '降水 ' + geoWeather.precipitation + ' mm' : '无降水'}
+
+          {/* ⭐ 显示完整天气 + 预报（adcode 模式） */}
+          {amapWeather && (
+            <>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+                <div className="bg-gradient-to-br from-sky-50 to-cyan-50 rounded-xl p-3 border border-sky-100">
+                  <div className="text-[28px] leading-none mb-2">{amapWeather.weatherIcon}</div>
+                  <div className="text-2xl font-bold text-sky-700">{amapWeather.temperature.toFixed(0)}°C</div>
+                  <div className="text-[11px] text-slate-500">{amapWeather.weatherText}</div>
+                </div>
+                <div className="bg-gradient-to-br from-orange-50 to-amber-50 rounded-xl p-3 border border-orange-100">
+                  <Thermometer className="w-4 h-4 text-orange-500 mb-2" />
+                  <div className="text-lg font-bold text-orange-700">
+                    {amapWeather.tempMax.toFixed(0)}° / {amapWeather.tempMin.toFixed(0)}°
+                  </div>
+                  <div className="text-[11px] text-slate-500">今天 高/低温</div>
+                </div>
+                <div className="bg-gradient-to-br from-emerald-50 to-teal-50 rounded-xl p-3 border border-emerald-100">
+                  <Wind className="w-4 h-4 text-emerald-500 mb-2" />
+                  <div className="text-lg font-bold text-emerald-700">
+                    {amapWeather.windDirection || '—'}风
+                  </div>
+                  <div className="text-[11px] text-slate-500">风力 {amapWeather.windPower || '—'}</div>
+                </div>
+                <div className="bg-gradient-to-br from-indigo-50 to-violet-50 rounded-xl p-3 border border-indigo-100">
+                  <Sun className="w-4 h-4 text-indigo-500 mb-2" />
+                  <div className="text-lg font-bold text-indigo-700">
+                    {amapWeather.forecast.length} 天预报
+                  </div>
+                  <div className="text-[11px] text-slate-500">高德地图 · {amapWeather.city}</div>
                 </div>
               </div>
-            </div>
-          )}
-          {geoWeather && (
-            <div className="mt-3 flex items-center justify-between text-[11px] text-muted">
-              <div className="flex items-center gap-1.5">
-                <Sun className="w-3 h-3 text-amber-500" /> {geoWeather.isDay ? '白天' : '夜间'}
+
+              {/* 4日预报 */}
+              <div className="border-t border-slate-100 pt-3">
+                <div className="text-[11px] text-muted mb-2">未来天气预报</div>
+                <div className="grid grid-cols-4 gap-2">
+                  {amapWeather.forecast.map((day, i) => (
+                    <div
+                      key={day.date || i}
+                      className="bg-white border border-slate-100 rounded-xl p-2.5 text-center hover:shadow-sm transition"
+                    >
+                      <div className="text-[11px] font-bold text-slate-700 mb-1">
+                        {i === 0 ? '今天' : i === 1 ? '明天' : day.weekText}
+                      </div>
+                      <div className="text-[20px] leading-none mb-1.5">{day.dayIcon}</div>
+                      <div className="text-sm font-bold text-slate-800">{day.dayTemp.toFixed(0)}°</div>
+                      <div className="text-[10px] text-slate-500 mb-0.5">{day.dayWeather}</div>
+                      <div className="text-[10px] text-slate-400">
+                        {day.dayWind || '—'}风
+                      </div>
+                      <div className="border-t border-slate-100 my-1.5" />
+                      <div className="text-[14px] leading-none mb-1">{day.nightIcon}</div>
+                      <div className="text-sm font-bold text-slate-600">{day.nightTemp.toFixed(0)}°</div>
+                      <div className="text-[10px] text-slate-500">{day.nightWeather}</div>
+                    </div>
+                  ))}
+                </div>
               </div>
-              <div>更新于 {new Date(geoWeather.fetchedAt).toLocaleString('zh-CN')}</div>
-            </div>
+
+              <div className="mt-3 flex items-center justify-between text-[11px] text-muted">
+                <div className="flex items-center gap-1.5">
+                  <Sun className="w-3 h-3 text-amber-500" /> {amapWeather.reportTime || new Date(amapWeather.fetchedAt).toLocaleDateString('zh-CN')}
+                </div>
+                <div>更新于 {new Date(amapWeather.fetchedAt).toLocaleTimeString('zh-CN')}</div>
+              </div>
+            </>
           )}
           {!geoWeather && geoStatus === 'success' && !geoLocLoading && (
             <div className="flex items-center justify-center gap-2 p-6 text-sm text-muted">

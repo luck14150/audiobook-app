@@ -522,31 +522,43 @@ function amapWeatherIcon(weather: string): { text: string; icon: string } {
   return { text: weather, icon: '🌡️' }
 }
 
-/** 风力等级 → 风速（km/h）近似换算 */
-function windpowerToSpeed(windpower: string): number {
-  if (!windpower) return 0
-  const match = windpower.match(/\d+/)
-  if (!match) return 0
-  const level = parseInt(match[0])
-  // 蒲福风级近似：速度 km/h ≈ 3.01 * level^1.5
-  return Math.round(3.01 * Math.pow(level, 1.5) * 10) / 10
+/** 数字星期 → 中文星期 */
+function weekNumberToText(week: string): string {
+  const map: Record<string, string> = {
+    '1': '星期一', '2': '星期二', '3': '星期三',
+    '4': '星期四', '5': '星期五', '6': '星期六', '7': '星期日'
+  }
+  return map[week] || '星期' + week
 }
 
 // ============================================================
 // 对外 API
 // ============================================================
 
-/**
- * ⭐ 通过高德地图 IP 定位（国内最准，无需用户授权）
- * 策略：JSONP 方式，跨域最可靠
- */
+/** 高德 API 统一请求（对应用户代码中的 $.getJSON） */
+async function amapRequest<T = any>(path: string, params: Record<string, string>): Promise<T> {
+  const allParams = { ...params, key: '89d198e442cee91f8b01e5d69b850eed', output: 'json' }
+  const qs = new URLSearchParams(allParams).toString()
+  const url = `https://restapi.amap.com${path}?${qs}`
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 15000)
+  try {
+    const res = await fetch(url, { signal: controller.signal })
+    if (!res.ok) throw new Error('HTTP ' + res.status)
+    const data = await res.json()
+    if (data.status !== '1') throw new Error('高德 API 错误: ' + (data.info || '未知错误'))
+    return data as T
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/** IP 定位（用户代码中的 $.getJSON(ip)） */
 export async function fetchLocationByIP(_key?: string): Promise<GeoResult & { ip?: string }> {
   const data = await amapRequest<any>('/v3/ip', {})
-  if (data.status !== '1') throw new Error('高德 IP 定位失败: ' + (data.info || '未知错误'))
-
   const city = data.city || '未知城市'
+  const province = data.province || ''
   const adcode = data.adcode || lookupAdcode(city) || '110000'
-  // rectangle 格式："经度,纬度;经度,纬度"，取中心点
   let lat = 39.9042, lon = 116.4074
   if (data.rectangle && typeof data.rectangle === 'string') {
     const parts = data.rectangle.split(';')
@@ -560,136 +572,127 @@ export async function fetchLocationByIP(_key?: string): Promise<GeoResult & { ip
     const coords = lookupCityCoords(city)
     if (coords) { lat = coords.lat; lon = coords.lon }
   }
-
   return {
-    lat, lon, city,
-    country: '中国',
-    timeZone: 'Asia/Shanghai',
-    adcode,
-    ip: data.ip || undefined,
+    lat, lon, city: province + city, country: '中国',
+    timeZone: 'Asia/Shanghai', adcode, ip: data.ip || undefined,
   }
 }
 
-/**
- * ⭐ 获取当前客户端 IP 和地理位置（多层 Fallback）
- * 优先级：browser GPS → 高德 JSONP → ip-api.com → 内置表
- */
+/** 客户端定位（多层 fallback） */
 export async function fetchClientLocation(): Promise<GeoResult & { ip?: string }> {
-  // 方法 1: 浏览器 GPS（如有精确位置且在中国附近，优先使用）
+  // 方法 1: GPS
   if (typeof navigator !== 'undefined' && navigator.geolocation) {
     try {
       const pos = await new Promise<GeolocationPosition>((resolve, reject) =>
         navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 8000, maximumAge: 300000 })
       )
-      const lat = pos.coords.latitude
-      const lon = pos.coords.longitude
-      // GPS 在中国范围内才使用
+      const lat = pos.coords.latitude, lon = pos.coords.longitude
       if (lat >= 15 && lat <= 60 && lon >= 70 && lon <= 140) {
         const geo = await reverseGeocode(lat, lon)
         const adcode = lookupAdcode(geo.city) ?? undefined
         return { lat, lon, city: geo.city, country: geo.country, timeZone: geo.timeZone, adcode }
       }
-    } catch { /* GPS 失败或不在中国，继续下一个方法 */ }
+    } catch { /* 继续 */ }
   }
-
-  // 方法 2: 高德 IP 定位（JSONP，最可靠国内服务）
+  // 方法 2: 高德 IP（最可靠）
+  try { return await fetchLocationByIP() } catch { /* 继续 */ }
+  // 方法 3: ipapi.co（免费）
   try {
-    return await fetchLocationByIP()
-  } catch { /* 高德失败 */ }
-
-  // 方法 3: ip-api.com（免费，每分钟限制 45 次，使用 JSONP 方式）
-  try {
-    const data = await jsonpRequest<any>('https://ip-api.com/json/?fields=status,country,city,lat,lon,query')
-    if (data.status === 'success') {
-      const city = data.city || '未知城市'
-      const adcode = lookupAdcode(city) ?? undefined
-      return {
-        lat: data.lat,
-        lon: data.lon,
-        city,
-        country: data.country || '未知',
-        timeZone: 'auto',
-        adcode,
-        ip: data.query || undefined,
-      }
+    const data = await fetch('https://ipapi.co/json/').then(r => r.json())
+    if (data.city) {
+      const adcode = lookupAdcode(data.city) ?? undefined
+      return { lat: data.latitude, lon: data.longitude, city: data.city, country: data.country_name || '', timeZone: data.timezone || '', adcode }
     }
-  } catch { /* ip-api 失败 */ }
-
-  // 方法 4: ipwho.is（备用免费服务）
-  try {
-    const res = await fetch('https://ipwho.is/?fields=status,country,city,latitude,longitude,ip')
-    if (res.ok) {
-      const data = await res.json()
-      if (data.success !== false) {
-        const city = data.city || '未知城市'
-        const adcode = lookupAdcode(city) ?? undefined
-        return {
-          lat: data.latitude,
-          lon: data.longitude,
-          city,
-          country: data.country || '未知',
-          timeZone: data.timezone || 'auto',
-          adcode,
-          ip: data.ip || undefined,
-        }
-      }
-    }
-  } catch { /* ipwho.is 失败 */ }
-
-  throw new Error('无法获取位置信息，请手动输入城市')
+  } catch { /* 继续 */ }
+  throw new Error('无法获取位置，请手动输入城市')
 }
 
-/**
- * ⭐ 通过高德地图天气 API 获取天气（国内最权威）
- * city 参数优先使用 adcode（数字编码），确保查询准确
- */
-export async function fetchWeatherByAmapCity(cityName: string, _key?: string): Promise<WeatherResult> {
-  // 优先使用 adcode 查询，其次回退到中文城市名
-  const adcode = lookupAdcode(cityName) || cityName
-  const data = await amapRequest<any>('/v3/weather/weatherInfo', { city: adcode, extensions: 'base' })
-  if (data.status !== '1') throw new Error('高德天气失败: ' + (data.info || '未知错误'))
+/** 天气数据类型：包含当天 + 4日预报 */
+export type AmapWeatherResult = {
+  temperature: number
+  tempMin: number
+  tempMax: number
+  humidity: number
+  weatherText: string
+  weatherIcon: string
+  windPower: string
+  windDirection: string
+  city: string
+  reportTime: string
+  fetchedAt: number
+  forecast: Array<{
+    date: string; weekText: string; dayWeather: string; nightWeather: string
+    dayTemp: number; nightTemp: number; dayWind: string; nightWind: string
+    dayWindPower: string; nightWindPower: string; dayIcon: string; nightIcon: string
+  }>
+}
 
-  const lives = data.lives
-  if (!lives || lives.length === 0) throw new Error('未找到天气数据')
-
-  const live = lives[0]
-  // 高德 API 返回的 weather 是中文文本（如 "晴"、"小雨"）
-  const weatherText = live.weather || '未知'
-  const { text, icon } = amapWeatherIcon(weatherText)
-
-  const temp = parseFloat(live.temperature) || 0
-  const humi = parseFloat(live.humidity) || 0
-  const windSpeed = windpowerToSpeed(live.windpower || '')
-
-  // 风向文本 → 角度（近似）
-  const windDirMap: Record<string, number> = {
-    '北': 0, '东北': 45, '东': 90, '东南': 135,
-    '南': 180, '西南': 225, '西': 270, '西北': 315,
-    '北风': 0, '东北风': 45, '东风': 90, '东南风': 135,
-    '南风': 180, '西南风': 225, '西风': 270, '西北风': 315,
-    '无持续风向': 0, '旋转风': 0,
-  }
-  const windDir = windDirMap[live.winddirection] ?? 0
-
-  // 白天/夜晚判断
-  const hour = new Date().getHours()
-  const isDay = hour >= 6 && hour < 18
-
+/** 获取天气（extensions=all，含4日预报，如用户代码中的 getWeather(adcode)） */
+export async function fetchWeatherByAmap(adcode: string): Promise<AmapWeatherResult> {
+  const data = await amapRequest<any>('/v3/weather/weatherInfo', { city: adcode, extensions: 'all' })
+  const forecast = data.forecasts || []
+  if (forecast.length === 0) throw new Error('未获取到天气数据')
+  const today = forecast[0]
+  const casts = today.casts || []
+  if (casts.length === 0) throw new Error('未获取到天气详情')
+  const current = casts[0]
+  const { text, icon } = amapWeatherIcon(current.dayweather || current.nightweather || '晴')
   return {
-    temperature: temp,
-    apparentTemperature: temp,
-    humidity: humi,
-    windSpeed,
-    windDirection: windDir,
-    weatherCode: 0,
+    temperature: parseFloat(current.daytemp) || 0,
+    tempMin: parseFloat(current.nighttemp) || 0,
+    tempMax: parseFloat(current.daytemp) || 0,
+    humidity: 0,
     weatherText: text,
     weatherIcon: icon,
-    isDay,
-    precipitation: 0,
-    cloudCover: 0,
-    city: live.city || cityName,
-    country: '中国',
+    windPower: current.daypower || '',
+    windDirection: current.daywind || '',
+    city: today.city || '',
+    reportTime: today.reporttime || new Date().toISOString().slice(0, 10),
     fetchedAt: Date.now(),
+    forecast: casts.map((c: any) => {
+      const di = amapWeatherIcon(c.dayweather || '晴')
+      const ni = amapWeatherIcon(c.nightweather || '晴')
+      return {
+        date: c.date || '',
+        weekText: weekNumberToText(c.week || '1'),
+        dayWeather: c.dayweather || '晴', nightWeather: c.nightweather || '晴',
+        dayTemp: parseFloat(c.daytemp) || 0, nightTemp: parseFloat(c.nighttemp) || 0,
+        dayWind: c.daywind || '', nightWind: c.nightwind || '',
+        dayWindPower: c.daypower || '', nightWindPower: c.nightpower || '',
+        dayIcon: di.icon, nightIcon: ni.icon,
+      }
+    }),
+  }
+}
+
+/** 兼容旧 API：直接调用新的 adcode 方式，同时保留旧接口 */
+export async function fetchWeatherByAmapCity(cityName: string, _key?: string): Promise<WeatherResult> {
+  const adcode = lookupAdcode(cityName) || cityName
+  try {
+    const w = await fetchWeatherByAmap(adcode)
+    return {
+      temperature: w.temperature, apparentTemperature: w.temperature,
+      humidity: w.humidity, windSpeed: 0, windDirection: 0,
+      weatherCode: 0, weatherText: w.weatherText, weatherIcon: w.weatherIcon,
+      isDay: true, precipitation: 0, cloudCover: 0,
+      city: w.city, country: '中国', fetchedAt: w.fetchedAt,
+    }
+  } catch {
+    // 回退：extensions=base 模式（实时）
+    const data = await amapRequest<any>('/v3/weather/weatherInfo', { city: adcode, extensions: 'base' })
+    const lives = data.lives || []
+    if (lives.length === 0) throw new Error('未获取到天气数据')
+    const live = lives[0]
+    const { text, icon } = amapWeatherIcon(live.weather || '未知')
+    return {
+      temperature: parseFloat(live.temperature) || 0,
+      apparentTemperature: parseFloat(live.temperature) || 0,
+      humidity: parseFloat(live.humidity) || 0,
+      windSpeed: 0, windDirection: 0, weatherCode: 0,
+      weatherText: text, weatherIcon: icon,
+      isDay: true, precipitation: 0, cloudCover: 0,
+      city: live.city || cityName, country: '中国', fetchedAt: Date.now(),
+    }
   }
 }
 
