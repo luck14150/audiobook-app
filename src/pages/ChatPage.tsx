@@ -25,7 +25,6 @@ export default function ChatPage(): React.ReactElement {
     deleteSession,
     sendMessage,
     setCurrentPersona,
-    setCurrentModel,
     pinConversation,
     activePersonaId,
     personas,
@@ -147,7 +146,6 @@ export default function ChatPage(): React.ReactElement {
                     key={p.id}
                     onClick={() => {
                       setCurrentPersona(p.id)
-                      setCurrentModel('default')
                     }}
                     className={`flex items-center gap-1.5 px-2 py-2 rounded-lg text-[11px] transition-all ${
                       p.id === activePersonaId

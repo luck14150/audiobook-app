@@ -39,9 +39,6 @@ const PRESETS: Preset[] = [
   { label: 'OpenAI 兼容', endpoint: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
 ]
 
-const DEFAULT_ENDPOINT = 'https://ark.cn-beijing.volces.com/api/v3'
-const DEFAULT_MODEL = 'doubao-pro-250615'
-
 function formatNumber(n: number): string {
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(2) + 'M'
   if (n >= 10_000) return (n / 10_000).toFixed(2) + '万'
@@ -148,7 +145,7 @@ export default function SettingsPage(): React.ReactElement {
   const [modelDropdownOpen, setModelDropdownOpen] = useState<boolean>(false)
   const [showFreeGuide, setShowFreeGuide] = useState<boolean>(false)
 
-  const hasApi = useMemo<boolean>(() => Boolean(endpoint.trim() && apiKey.trim()), [endpoint, apiKey])
+  const hasApi = useMemo<boolean>(() => Boolean(endpoint.trim() && apiKey.trim() && modelName.trim()), [endpoint, apiKey, modelName])
 
   // 🚨 页面加载时强制同步 DEFAULT_SETTINGS 到 store
   // 解决 persist rehydrate 时序问题——确保 Agnes API 配置在 store 层面也生效
@@ -195,19 +192,19 @@ export default function SettingsPage(): React.ReactElement {
   }
 
   const handleClearConfig = (): void => {
-    setEndpoint(DEFAULT_ENDPOINT)
-    setApiKey('')
-    setModelName(DEFAULT_MODEL)
-    setTemperature(0.7)
-    setMaxTokens(2048)
-    setTopP(0.9)
+    setEndpoint(DEFAULT_SETTINGS.endpoint)
+    setApiKey(DEFAULT_SETTINGS.apiKey)
+    setModelName(DEFAULT_SETTINGS.modelName)
+    setTemperature(DEFAULT_SETTINGS.temperature)
+    setMaxTokens(DEFAULT_SETTINGS.maxTokens)
+    setTopP(DEFAULT_SETTINGS.topP)
     updateSettings({
-      endpoint: DEFAULT_ENDPOINT,
-      apiKey: '',
-      modelName: DEFAULT_MODEL,
-      temperature: 0.7,
-      maxTokens: 2048,
-      topP: 0.9,
+      endpoint: DEFAULT_SETTINGS.endpoint,
+      apiKey: DEFAULT_SETTINGS.apiKey,
+      modelName: DEFAULT_SETTINGS.modelName,
+      temperature: DEFAULT_SETTINGS.temperature,
+      maxTokens: DEFAULT_SETTINGS.maxTokens,
+      topP: DEFAULT_SETTINGS.topP,
     })
     setSavedMsg(true)
     window.setTimeout(() => setSavedMsg(false), 1500)

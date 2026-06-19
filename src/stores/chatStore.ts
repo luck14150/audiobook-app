@@ -159,7 +159,7 @@ export const useChatStore = create<ChatStore>()(
       currentModelId: DEFAULT_ACTIVE_MODEL_ID,
       currentPersonaId: 'general',
       get aiSettings() { return get().settings },
-      setAiSettings: (partial) => set({ settings: { ...get().settings, ...partial } }),
+      setAiSettings: (partial) => get().updateSettings(partial),
       get currentConversationId() { return get().activeSessionId },
       setCurrentConversation: (id) => set({ activeSessionId: id }),
       setCurrentPersona: (id) => set({ activePersonaId: id }),
@@ -399,16 +399,13 @@ export const useChatStore = create<ChatStore>()(
           const streamCb: StreamingCallbacks = {
             onDelta: (delta) => {
               if (controller.aborted) return
-              const current = get().messages.find(m => m.id === assistantId)
-              if (current) {
-                set({
-                  messages: get().messages.map((m) =>
-                    m.id === assistantId
-                      ? { ...m, content: (current.content || '') + delta, streaming: true }
-                      : m
-                  ),
-                })
-              }
+              set({
+                messages: get().messages.map((m) =>
+                  m.id === assistantId
+                    ? { ...m, content: (m.content || '') + delta, streaming: true }
+                    : m
+                ),
+              })
             },
             onDone: (full) => {
               set({
