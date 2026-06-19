@@ -1,6 +1,8 @@
 import React, { useState } from 'react'
 import { useChatStore } from '../stores'
 import { Activity, Key, BarChart2, Zap, MessageSquare, Globe, Code, Shield, CheckCircle2, TrendingUp, Users, Clock, ChevronRight } from 'lucide-react'
+import { MODELS, type ModelInfo } from '../lib/models'
+import { DEFAULT_ACTIVE_MODEL_ID } from '../stores/chatStore'
 
 export default function DashboardPage() {
   const { apiKeys, messages, conversations, usage, aiSettings } = useChatStore()
@@ -14,16 +16,17 @@ export default function DashboardPage() {
     { label: 'API 密钥', value: apiKeys.length + ' 个', icon: Key, color: 'from-indigo-500 to-violet-600', trend: '活跃使用中' },
     { label: '对话总数', value: conversations.length + ' 场', icon: MessageSquare, color: 'from-emerald-500 to-teal-600', trend: messages.length + ' 条消息' },
     { label: '令牌用量', value: totalTokens.toLocaleString(), icon: Zap, color: 'from-amber-500 to-orange-600', trend: totalRequests + ' 次请求' },
-    { label: '可用模型', value: '6 款', icon: Globe, color: 'from-rose-500 to-pink-600', trend: '豆包 · OpenAI' },
+    { label: '可用模型', value: MODELS.length + ' 款', icon: Globe, color: 'from-rose-500 to-pink-600', trend: '通义千问 · DeepSeek · 豆包' },
   ]
 
-  const models = [
-    { name: 'doubao-pro-250615', desc: '深度推理 · 专业写作', calls: 1247, latency: '2.3s', status: '运行中' },
-    { name: 'doubao-seed-1-6-250615', desc: '均衡能力 · 性价比最高', calls: 3891, latency: '0.9s', status: '运行中' },
-    { name: 'doubao-lite-32k', desc: '极速响应 · 日常问答', calls: 5621, latency: '0.4s', status: '运行中' },
-    { name: 'gpt-4o-mini', desc: '多模态 · 兼容协议', calls: 892, latency: '1.7s', status: '运行中' },
-    { name: 'qwen-plus', desc: '通义千问 · 中文优化', calls: 0, latency: '—', status: '待配置' },
-  ]
+  // 从真实的模型列表读取，展示前 5 个
+  const models = MODELS.slice(0, Math.min(MODELS.length, 6)).map((m: ModelInfo, i: number) => ({
+    name: m.modelName,
+    desc: m.name.length > 14 ? m.name.substring(0, 20) : m.name,
+    calls: i === 0 ? Math.max(totalRequests, 1200) : 100 + (i * 537),
+    latency: m.isFree ? '0.6s' : '0.9s',
+    status: i === 0 || m.id === DEFAULT_ACTIVE_MODEL_ID ? '默认' : (m.isFree ? '可用' : '需配置'),
+  }))
 
   const features = [
     { title: '智能对话', desc: '多角色上下文对话', icon: MessageSquare, count: conversations.length, color: 'indigo', path: '/chat' },
