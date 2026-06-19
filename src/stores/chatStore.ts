@@ -127,13 +127,13 @@ function uid(): string { return genId() }
 
 // ===================== Store 定义 =====================
 
-// 默认使用 Agnes AI（永久免费·无限用，新加坡 Sapiens AI）
-export const DEFAULT_ACTIVE_MODEL_ID = 'agnes-2.0-flash'
+// 默认使用 Qwen Plus（通义千问增强版，国内直连速度快）
+export const DEFAULT_ACTIVE_MODEL_ID = 'qw-plus'
 
 export const DEFAULT_SETTINGS: ApiSettings = {
-  endpoint: 'https://apihub.agnes-ai.com/v1',
+  endpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
   apiKey: 'sk-tIQbtS4899pY8zv4mtL7iAf5nBLpD6NY5AWVv8ho4vADZxZb',
-  modelName: 'agnes-2.0-flash',
+  modelName: 'qwen-plus',
   temperature: 0.7,
   maxTokens: 2048,
   topP: 0.9,

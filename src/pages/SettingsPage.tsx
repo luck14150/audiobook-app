@@ -25,11 +25,11 @@ import {
   Code,
   BookOpen,
 } from 'lucide-react'
-import { MODELS, SORTED_MODELS, FREE_MODELS, getModelById, RECOMMENDED_FREE_MODEL } from '../lib/models'
+import { MODELS, SORTED_MODELS, FREE_MODELS, getModelById } from '../lib/models'
 import { DEFAULT_SETTINGS, DEFAULT_ACTIVE_MODEL_ID } from '../stores/chatStore'
 
-// 🔑 Agnes AI 配置——直接在本文件硬编码，确保不依赖任何外部状态
-// （本常量在 SettingsPage 初始化本地 state 时直接使用）
+// 🔑 Qwen Plus API Key — 直接在本文件硬编码，确保不依赖任何外部状态
+// （打开即用，除非代码修改，否则每次打开不变）
 const HARDCODED_API_KEY = 'sk-tIQbtS4899pY8zv4mtL7iAf5nBLpD6NY5AWVv8ho4vADZxZb'
 
 interface Preset {
@@ -39,8 +39,14 @@ interface Preset {
 }
 
 const PRESETS: Preset[] = [
-  { label: '豆包（火山方舟）', endpoint: 'https://ark.cn-beijing.volces.com/api/v3', model: 'doubao-pro-250615' },
-  { label: 'OpenAI 兼容', endpoint: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
+  { label: '⭐ Qwen Plus（通义千问·国内直连·默认）', endpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen-plus' },
+  { label: '🌟 Agnes AI（无限免费）', endpoint: 'https://apihub.agnes-ai.com/v1', model: 'agnes-2.0-flash' },
+  { label: '🧠 豆包（字节跳动）', endpoint: 'https://ark.cn-beijing.volces.com/api/v3', model: 'doubao-seed-2.0-lite' },
+  { label: '⚡ DeepSeek（国产最强）', endpoint: 'https://api.deepseek.com/v1', model: 'deepseek-chat' },
+  { label: '📚 Kimi（超长上下文）', endpoint: 'https://api.moonshot.cn/v1', model: 'kimi-k2.5' },
+  { label: '🧩 智谱 GLM', endpoint: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-5-flash' },
+  { label: '🌀 通义千问（开源版）', endpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen2.5-7b-instruct' },
+  { label: '🔬 硅基流动（国产聚合）', endpoint: 'https://api.siliconflow.cn/v1', model: 'Qwen/Qwen2.5-7B-Instruct' },
 ]
 
 function formatNumber(n: number): string {
