@@ -57,6 +57,11 @@ interface ChatStore {
   personas: PersonaProfile[]
   activePersonaId: string
   knowledge: KnowledgeEntry[]
+  // ⭐ 扩展知识库（10 万条，按需加载）
+  externalKnowledgeLoaded: boolean
+  externalKnowledgeLoading: boolean
+  externalKnowledgeError: string | null
+  loadExternalKnowledge: () => Promise<void>
   settings: ApiSettings
 
   // UI 状态（页面需要）
@@ -431,6 +436,58 @@ export const useChatStore = create<ChatStore>()(
       activePersonaId: 'general',
       // ⭐ 首次打开即带默认知识库（用户可在知识库页面删除）
       knowledge: DEFAULT_KNOWLEDGE,
+      // ⭐ 扩展知识库状态
+      externalKnowledgeLoaded: false,
+      externalKnowledgeLoading: false,
+      externalKnowledgeError: null,
+      loadExternalKnowledge: async () => {
+        const st = get()
+        if (st.externalKnowledgeLoading || st.externalKnowledgeLoaded) return
+        set({ externalKnowledgeLoading: true, externalKnowledgeError: null })
+        try {
+          // 保证 GitHub Pages / 开发服务器 / localhost 都可用
+          const origin = window.location.origin
+          const base = origin + '/'
+          const manifest = await fetch(base + 'knowledge/manifest.json').then(r => {
+            if (!r.ok) throw new Error('manifest 加载失败: ' + r.status)
+            return r.json()
+          })
+          const files: string[] = manifest.files || []
+          // 每 5 个 chunk 合并一次写入 store，减少 React 重渲染
+          let batch: any[] = []
+          for (let i = 0; i < files.length; i++) {
+            const chunk = await fetch(base + 'knowledge/' + files[i]).then(r => {
+              if (!r.ok) throw new Error(files[i] + ' 加载失败: ' + r.status)
+              return r.json()
+            })
+            if (Array.isArray(chunk)) {
+              for (const e of chunk) {
+                if (e && e.t && e.s) {
+                  batch.push({
+                    id: e.i || `k-ext-${Date.now()}-${Math.random()}`,
+                    title: e.t,
+                    content: e.s,
+                    category: e.c || '其他',
+                    tags: Array.isArray(e.g) ? e.g : [],
+                    createdAt: Date.now(),
+                    updatedAt: Date.now(),
+                  })
+                }
+              }
+            }
+            if ((i + 1) % 5 === 0 || i === files.length - 1) {
+              if (batch.length > 0) {
+                set({ knowledge: [...get().knowledge, ...batch] })
+                batch = []
+              }
+            }
+          }
+          set({ externalKnowledgeLoaded: true, externalKnowledgeLoading: false })
+        } catch (err: any) {
+          console.warn('[知识库] 加载外部知识失败:', err?.message || err)
+          set({ externalKnowledgeLoading: false, externalKnowledgeError: err?.message || '加载失败' })
+        }
+      },
       settings: DEFAULT_SETTINGS,
       theme: 'light',
       setTheme: (t) => set({ theme: t }),

@@ -1,0 +1,40 @@
+{
+  "total": 100000,
+  "chunkSize": 5000,
+  "numChunks": 20,
+  "generatedAt": "2026-06-19T05:32:41.597Z",
+  "categories": [
+    "大模型介绍",
+    "提示词技巧",
+    "编程知识",
+    "算法与数据结构",
+    "AI行业知识",
+    "机器学习基础",
+    "前端开发",
+    "后端与系统",
+    "实用技巧",
+    "学习方法"
+  ],
+  "files": [
+    "chunk-00.json",
+    "chunk-01.json",
+    "chunk-02.json",
+    "chunk-03.json",
+    "chunk-04.json",
+    "chunk-05.json",
+    "chunk-06.json",
+    "chunk-07.json",
+    "chunk-08.json",
+    "chunk-09.json",
+    "chunk-10.json",
+    "chunk-11.json",
+    "chunk-12.json",
+    "chunk-13.json",
+    "chunk-14.json",
+    "chunk-15.json",
+    "chunk-16.json",
+    "chunk-17.json",
+    "chunk-18.json",
+    "chunk-19.json"
+  ]
+}

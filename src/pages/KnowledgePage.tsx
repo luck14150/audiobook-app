@@ -68,10 +68,22 @@ export default function KnowledgePage() {
   const addKnowledge = useChatStore((state) => state.addKnowledge)
   const updateKnowledge = useChatStore((state) => state.updateKnowledge)
   const deleteKnowledge = useChatStore((state) => state.deleteKnowledge)
+  const externalKnowledgeLoaded = useChatStore((s) => s.externalKnowledgeLoaded)
+  const externalKnowledgeLoading = useChatStore((s) => s.externalKnowledgeLoading)
+  const loadExternalKnowledge = useChatStore((s) => s.loadExternalKnowledge)
 
   // 搜索和分类筛选状态
   const [searchText, setSearchText] = useState('')
   const [activeCategory, setActiveCategory] = useState<string>('all')
+  // 分页：每页显示数量（100k 条不能一次性渲染）
+  const [pageSize, setPageSize] = useState(60)
+
+  // 首次加载时自动触发外部知识加载（如果数量很少）
+  useEffect(() => {
+    if (knowledge.length < 20 && !externalKnowledgeLoading && !externalKnowledgeLoaded) {
+      loadExternalKnowledge()
+    }
+  }, [])
 
   // 弹窗状态
   const [editorOpen, setEditorOpen] = useState(false)
@@ -116,14 +128,12 @@ export default function KnowledgePage() {
     return list
   }, [knowledge])
 
-  // 过滤后的知识列表
+  // 过滤后的知识列表 + 分页
   const filteredKnowledge = useMemo(() => {
     const q = searchText.trim().toLowerCase()
-    return knowledge
+    const base = knowledge
       .filter((k) => {
-        // 分类过滤
         if (activeCategory !== 'all' && k.category !== activeCategory) return false
-        // 搜索过滤：标题、内容、标签、分类
         if (!q) return true
         if (k.title.toLowerCase().includes(q)) return true
         if (k.content.toLowerCase().includes(q)) return true
@@ -131,8 +141,13 @@ export default function KnowledgePage() {
         if (k.tags && k.tags.some((t) => t.toLowerCase().includes(q))) return true
         return false
       })
-      .sort((a, b) => b.updatedAt - a.updatedAt) // 按更新时间倒序
-  }, [knowledge, searchText, activeCategory])
+    // 10 万条数据只取前 pageSize 条，避免一次性渲染
+    return {
+      all: base,
+      visible: base.slice(0, pageSize),
+      totalCount: base.length,
+    }
+  }, [knowledge, searchText, activeCategory, pageSize])
 
   // 打开新增弹窗
   const handleAddNew = () => {
@@ -265,18 +280,34 @@ export default function KnowledgePage() {
             <div>
               <h1 className="text-xl md:text-2xl font-bold text-primary">📚 知识库</h1>
               <p className="text-xs text-muted">
-                共 {knowledge.length} 条知识 · 对话时自动注入相关内容到 AI 上下文
+                共 {knowledge.length.toLocaleString()} 条知识 · 对话时自动注入相关内容到 AI 上下文
               </p>
             </div>
           </div>
 
-          <button
-            onClick={handleAddNew}
-            className="flex items-center gap-1.5 px-4 py-2.5 bg-gradient-to-r from-violet-500 to-indigo-600 hover:from-violet-600 hover:to-indigo-700 text-white rounded-xl shadow-md shadow-violet-500/20 transition-all hover:-translate-y-0.5 hover:shadow-lg text-sm font-medium"
-          >
-            <Plus className="w-4 h-4" />
-            添加知识
-          </button>
+            <div className="flex items-center gap-3">
+              {externalKnowledgeLoading && (
+                <div className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 border border-amber-200 text-amber-700 rounded-xl text-xs font-medium">
+                  <span className="inline-block w-2 h-2 bg-amber-500 rounded-full animate-pulse"></span>
+                  正在加载 {knowledge.length.toLocaleString()} 条知识...
+                </div>
+              )}
+              {!externalKnowledgeLoaded && !externalKnowledgeLoading && (
+                <button
+                  onClick={() => loadExternalKnowledge()}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white rounded-xl text-xs font-medium shadow-md shadow-amber-500/20 transition-all"
+                >
+                  <Plus className="w-3.5 h-3.5" /> 加载 10 万条 AI 知识
+                </button>
+              )}
+              <button
+                onClick={handleAddNew}
+                className="flex items-center gap-1.5 px-4 py-2.5 bg-gradient-to-r from-violet-500 to-indigo-600 hover:from-violet-600 hover:to-indigo-700 text-white rounded-xl shadow-md shadow-violet-500/20 transition-all hover:-translate-y-0.5 hover:shadow-lg text-sm font-medium"
+              >
+                <Plus className="w-4 h-4" />
+                添加知识
+              </button>
+            </div>
         </div>
 
         {/* 搜索框 */}
@@ -302,7 +333,7 @@ export default function KnowledgePage() {
                   : 'bg-slate-100 text-secondary hover:bg-slate-200')
               }
             >
-              📚 全部 ({knowledge.length})
+              📚 全部 ({knowledge.length.toLocaleString()})
             </button>
             {categoryStats.map((cat) => (
               <button
@@ -315,7 +346,7 @@ export default function KnowledgePage() {
                     : 'bg-slate-100 text-secondary hover:bg-slate-200')
                 }
               >
-                {cat.name} ({cat.count})
+                {cat.name} ({cat.count.toLocaleString()})
               </button>
             ))}
           </div>
@@ -345,14 +376,14 @@ export default function KnowledgePage() {
                     全部
                   </span>
                   <span
-                    className={
-                      'px-1.5 py-0.5 rounded text-[10px] ' +
-                      (activeCategory === 'all' ? 'bg-white/20' : 'bg-slate-200 text-slate-600')
-                    }
-                  >
-                    {knowledge.length}
-                  </span>
-                </button>
+                      className={
+                        'px-1.5 py-0.5 rounded text-[10px] ' +
+                        (activeCategory === 'all' ? 'bg-white/20' : 'bg-slate-200 text-slate-600')
+                      }
+                    >
+                      {knowledge.length.toLocaleString()}
+                    </span>
+                  </button>
                 {categoryStats.map((cat) => (
                   <button
                     key={cat.name}
@@ -374,7 +405,7 @@ export default function KnowledgePage() {
                         (activeCategory === cat.name ? 'bg-white/20' : 'bg-slate-200 text-slate-600')
                       }
                     >
-                      {cat.count}
+                      {cat.count.toLocaleString()}
                     </span>
                   </button>
                 ))}
@@ -398,17 +429,17 @@ export default function KnowledgePage() {
           {/* 右侧内容区 */}
           <main className="flex-1 min-w-0">
             {/* 当前分类标题 */}
-            {filteredKnowledge.length > 0 && (
+            {filteredKnowledge.totalCount > 0 && (
               <div className="flex items-center justify-between mb-4 px-1">
                 <h2 className="text-sm font-bold text-primary">
                   {currentCategoryLabel}
-                  <span className="text-muted font-normal ml-2">· {filteredKnowledge.length} 条结果</span>
+                  <span className="text-muted font-normal ml-2">· {filteredKnowledge.totalCount.toLocaleString()} 条结果</span>
                 </h2>
               </div>
             )}
 
             {/* 空状态 */}
-            {filteredKnowledge.length === 0 && (
+            {filteredKnowledge.totalCount === 0 && (
               <div className="bg-white rounded-2xl shadow-sm border border-theme p-12 text-center">
                 {knowledge.length === 0 ? (
                   // 完全无数据的引导空状态
@@ -462,9 +493,10 @@ export default function KnowledgePage() {
             )}
 
             {/* 知识卡片网格 */}
-            {filteredKnowledge.length > 0 && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 md:gap-4">
-                {filteredKnowledge.map((item) => (
+            {filteredKnowledge.visible.length > 0 && (
+              <>
+                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 md:gap-4">
+                  {filteredKnowledge.visible.map((item) => (
                   <div
                     key={item.id}
                     className="group bg-white rounded-2xl shadow-sm border border-theme p-4 transition-all duration-300 hover:-translate-y-1 hover:shadow-lg hover:border-violet-200 animate-fade-in flex flex-col"
@@ -539,6 +571,18 @@ export default function KnowledgePage() {
                   </div>
                 ))}
               </div>
+              {/* 加载更多（分页） */}
+              {filteredKnowledge.totalCount > filteredKnowledge.visible.length && (
+                <div className="mt-6 text-center">
+                  <button
+                    onClick={() => setPageSize((p) => p + 60)}
+                    className="px-6 py-2.5 bg-white hover:bg-slate-50 border border-slate-200 text-primary text-sm font-medium rounded-xl shadow-sm transition-all"
+                  >
+                    加载更多（还剩 {(filteredKnowledge.totalCount - filteredKnowledge.visible.length).toLocaleString()} 条）
+                  </button>
+                </div>
+              )}
+              </>
             )}
           </main>
         </div>
