@@ -849,20 +849,18 @@ export const useChatStore = create<ChatStore>()(
       },
     }),
     {
-      name: 'datamind-chat-v2',
+      name: 'datamind-chat-v3',
       storage: createJSONStorage(() => localStorage),
-      // version 3: 彻底确保 settings 永远使用 DEFAULT_SETTINGS
-      // - 换用新的 storage key（datamind-chat-v2），避免旧数据干扰
-      // - migrate 清除所有旧版本中的 settings
-      // - partialize 不写入 settings
-      // - merge 强制 settings = DEFAULT_SETTINGS
-      // - onRehydrateStorage 作为最后防线，rehydrate 后再次强制覆盖
-      version: 3,
+      // version 4: 修复知识库初始化——storage key 换 v3 确保干净数据
+      // - settings：始终使用代码中 DEFAULT_SETTINGS（不持久化、不读取）
+      // - knowledge：如果用户已有自定义内容则保留，空/缺失时使用 DEFAULT_KNOWLEDGE
+      // - persist 读取时若 knowledge 为 [] → 用 DEFAULT_KNOWLEDGE 初始化
+      version: 4,
       partialize: (state) => ({
         sessions: state.sessions,
         messages: state.messages,
         activeSessionId: state.activeSessionId,
-        knowledge: state.knowledge,
+        knowledge: state.knowledge, // 保留用户自定义内容，否则会失去他们写的笔记
         activePersonaId: state.activePersonaId,
         theme: state.theme,
         fontSize: state.fontSize,
@@ -872,7 +870,7 @@ export const useChatStore = create<ChatStore>()(
         // ⚠️ settings 不持久化——始终使用代码中 DEFAULT_SETTINGS
       }),
       migrate: (persistedState, version) => {
-        if (version < 3 && persistedState && typeof persistedState === 'object') {
+        if (version < 4 && persistedState && typeof persistedState === 'object') {
           const { settings, ...clean } = persistedState as Record<string, any>
           void settings
           return clean
@@ -881,11 +879,19 @@ export const useChatStore = create<ChatStore>()(
       },
       merge: (persistedState, currentState) => {
         const persisted = persistedState || {}
-        const { settings, ...rest } = persisted as Record<string, any>
+        const { settings, knowledge, ...rest } = persisted as Record<string, any>
         void settings
+        // 如果持久化中 knowledge 为空数组或缺失，使用代码中的默认知识库
+        // 否则保留用户自己写的条目
+        const mergedKnowledge = Array.isArray(knowledge) && knowledge.length > 0
+          ? knowledge
+          : currentState.knowledge && (currentState.knowledge as any[]).length > 0
+            ? currentState.knowledge
+            : DEFAULT_KNOWLEDGE
         return {
           ...currentState,
           ...rest,
+          knowledge: mergedKnowledge,
           settings: DEFAULT_SETTINGS,
         } as ChatStore
       },
