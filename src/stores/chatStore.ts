@@ -849,28 +849,26 @@ export const useChatStore = create<ChatStore>()(
       },
     }),
     {
-      name: 'datamind-chat-v3',
+      name: 'datamind-chat-v4',
       storage: createJSONStorage(() => localStorage),
-      // version 4: 修复知识库初始化——storage key 换 v3 确保干净数据
+      // version 5: 彻底确保空/缺失的 knowledge 不覆盖默认知识库
       // - settings：始终使用代码中 DEFAULT_SETTINGS（不持久化、不读取）
-      // - knowledge：如果用户已有自定义内容则保留，空/缺失时使用 DEFAULT_KNOWLEDGE
-      // - persist 读取时若 knowledge 为 [] → 用 DEFAULT_KNOWLEDGE 初始化
-      version: 4,
+      // - knowledge：持久化中为 [] 或 undefined → 使用 DEFAULT_KNOWLEDGE；有自定义内容 → 保留
+      version: 5,
       partialize: (state) => ({
         sessions: state.sessions,
         messages: state.messages,
         activeSessionId: state.activeSessionId,
-        knowledge: state.knowledge, // 保留用户自定义内容，否则会失去他们写的笔记
+        knowledge: state.knowledge,
         activePersonaId: state.activePersonaId,
         theme: state.theme,
         fontSize: state.fontSize,
         sidebarCollapsed: state.sidebarCollapsed,
         apiKeys: state.apiKeys,
         currentModelId: state.currentModelId,
-        // ⚠️ settings 不持久化——始终使用代码中 DEFAULT_SETTINGS
       }),
       migrate: (persistedState, version) => {
-        if (version < 4 && persistedState && typeof persistedState === 'object') {
+        if (version < 5 && persistedState && typeof persistedState === 'object') {
           const { settings, ...clean } = persistedState as Record<string, any>
           void settings
           return clean
@@ -878,27 +876,26 @@ export const useChatStore = create<ChatStore>()(
         return persistedState
       },
       merge: (persistedState, currentState) => {
-        const persisted = persistedState || {}
-        const { settings, knowledge, ...rest } = persisted as Record<string, any>
-        void settings
-        // 如果持久化中 knowledge 为空数组或缺失，使用代码中的默认知识库
-        // 否则保留用户自己写的条目
-        const mergedKnowledge = Array.isArray(knowledge) && knowledge.length > 0
-          ? knowledge
-          : currentState.knowledge && (currentState.knowledge as any[]).length > 0
-            ? currentState.knowledge
-            : DEFAULT_KNOWLEDGE
+        const persisted = persistedState as Record<string, any> | undefined
+        const rest: Record<string, any> = {}
+        let persistedKnowledge: any = undefined
+        if (persisted && typeof persisted === 'object') {
+          for (const key of Object.keys(persisted)) {
+            if (key === 'settings') continue
+            if (key === 'knowledge') { persistedKnowledge = persisted.knowledge; continue }
+            rest[key] = persisted[key]
+          }
+        }
+        const hasUserKnowledge = Array.isArray(persistedKnowledge) && persistedKnowledge.length > 0
+        const mergedKnowledge = hasUserKnowledge
+          ? persistedKnowledge
+          : (currentState.knowledge && currentState.knowledge.length > 0 ? currentState.knowledge : DEFAULT_KNOWLEDGE)
         return {
           ...currentState,
           ...rest,
           knowledge: mergedKnowledge,
           settings: DEFAULT_SETTINGS,
         } as ChatStore
-      },
-      onRehydrateStorage: () => (state) => {
-        if (state) {
-          ;(state as any).settings = DEFAULT_SETTINGS
-        }
       },
     }
   )
